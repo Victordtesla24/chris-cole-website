@@ -1,0 +1,61 @@
+{
+  "name": "chris-cole-clone",
+  "version": "1.0.0",
+  "description": "Chris Cole Portfolio Clone - Modern, animated portfolio website",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:unit": "jest tests/unit",
+    "test:system": "jest tests/system",
+    "test:config": "jest tests/unit/config",
+    "test:visual": "playwright test tests/visual-regression",
+    "test:visual:ui": "playwright test tests/visual-regression --ui",
+    "test:visual:debug": "playwright test tests/visual-regression --debug"
+  },
+  "dependencies": {
+    "framer-motion": "^10.16.16",
+    "gsap": "^3.12.4",
+    "lenis": "^1.3.14",
+    "next": "^14.0.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-intersection-observer": "^10.0.0",
+    "react-use": "^17.6.0",
+    "three": "^0.181.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "^1.56.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.19.24",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "@types/react": "^18.3.26",
+    "@types/react-dom": "^18.3.7",
+    "@types/three": "^0.181.0",
+    "autoprefixer": "^10.4.16",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "^14.0.4",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "ts-jest": "^29.4.5",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

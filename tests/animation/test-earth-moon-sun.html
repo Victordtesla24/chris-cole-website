@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Earth-Moon-Sun Animation Test - Photorealistic Concept 2</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Roboto Condensed', 'Arial Narrow', sans-serif;
+      background: #000000;
+      color: #ffffff;
+      overflow: hidden;
+    }
+
+    .container {
+      width: 100vw;
+      height: 100vh;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 300;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.8);
+      text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+    }
+
+    .header p {
+      font-size: 11px;
+      letter-spacing: 2px;
+      color: rgba(255, 255, 255, 0.4);
+      margin-top: 5px;
+    }
+
+    .canvas-container {
+      width: 100%;
+      height: 100%;
+      position: relative;
+    }
+
+    .info-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px 20px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font-size: 11px;
+      letter-spacing: 1px;
+      line-height: 1.6;
+      max-width: 300px;
+    }
+
+    .info-panel h3 {
+      font-size: 12px;
+      font-weight: 400;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      color: rgba(255, 255, 255, 0.9);
+    }
+
+    .info-panel ul {
+      list-style: none;
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .info-panel li::before {
+      content: '→ ';
+      color: rgba(255, 255, 255, 0.4);
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Jyotish Shastra</h1>
+      <p>Photorealistic Celestial Animation</p>
+    </div>
+
+    <div class="canvas-container">
+      <canvas id="animation-canvas"></canvas>
+    </div>
+
+    <div class="info-panel">
+      <h3>Active Features</h3>
+      <ul>
+        <li>Photorealistic Earth Globe</li>
+        <li>Textured Moon (Maria & Craters)</li>
+        <li>2000+ Solar Particles</li>
+        <li>Solar Flares (Every 2s)</li>
+        <li>Coronal Mass Ejections</li>
+        <li>5.14° Moon Inclination</li>
+        <li>23.5° Earth Axial Tilt</li>
+        <li>Volumetric Sun Rays</li>
+        <li>Rim Lighting Effects</li>
+      </ul>
+    </div>
+  </div>
+
+  <script>
+    // Configuration matching React component
+    const CONFIG = {
+      SUN_RADIUS_RATIO: 0.09,
+      EARTH_RADIUS_RATIO: 0.028,
+      MOON_RADIUS_RATIO: 0.012,
+      EARTH_ORBIT_RATIO: 0.35,
+      MOON_ORBIT_RATIO: 0.08,
+      EARTH_ORBIT_SPEED: 0.0003,
+      MOON_ORBIT_SPEED: 0.002,
+      EARTH_ROTATION_SPEED: 0.001,
+      MOON_ROTATION_SPEED: 0.002,
+      EARTH_AXIAL_TILT: 23.5 * (Math.PI / 180),
+      MOON_ORBITAL_INCLINATION: 5.14 * (Math.PI / 180),
+      FLARE_INTERVAL: 2000,
+      PARTICLES_PER_FLARE: 150,
+      CME_PARTICLES: 300,
+      CORONA_PARTICLES: 200,
+    };
+
+    // State
+    let canvas, ctx;
+    let stars = [];
+    let solarParticles = [];
+    let solarFlares = [];
+    let lastFlareTime = 0;
+    let earthAngle = 0;
+    let moonAngle = 0;
+    let earthRotation = 0;
+    let moonRotation = 0;
+
+    // Initialize
+    function init() {
+      canvas = document.getElementById('animation-canvas');
+      ctx = canvas.getContext('2d');
+
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      initStars();
+      animate();
+    }
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      initStars();
+    }
+
+    function initStars() {
+      stars = [];
+      const starCount = Math.floor((canvas.width * canvas.height) / 3000);
+
+      for (let i = 0; i < starCount; i++) {
+        stars.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          size: Math.random() * 1.5 + 0.5,
+          opacity: Math.random() * 0.5 + 0.3,
+          twinkleSpeed: Math.random() * 0.02 + 0.01,
+          twinklePhase: Math.random() * Math.PI * 2,
+        });
+      }
+    }
+
+    function createSolarFlare(sunRadius) {
+      const angle = Math.random() * Math.PI * 2;
+      const flare = {
+        angle,
+        startTime: Date.now(),
+        duration: 1500,
+        intensity: Math.random() * 0.5 + 0.5,
+        particles: [],
+      };
+
+      for (let i = 0; i < CONFIG.PARTICLES_PER_FLARE; i++) {
+        const particleAngle = angle + (Math.random() - 0.5) * 0.4;
+        flare.particles.push({
+          angle: particleAngle,
+          distance: sunRadius,
+          speed: Math.random() * 0.5 + 0.3,
+          size: Math.random() * 2 + 1,
+          opacity: 1,
+          life: 1,
+          maxLife: Math.random() * 800 + 700,
+          type: 'flare',
+          arcHeight: Math.random() * sunRadius * 2 + sunRadius,
+          arcProgress: 0,
+        });
+      }
+
+      solarFlares.push(flare);
+    }
+
+    function createCME(sunRadius) {
+      const cmeAngle = Math.random() * Math.PI * 2;
+
+      for (let i = 0; i < CONFIG.CME_PARTICLES; i++) {
+        const spread = (Math.random() - 0.5) * 0.8;
+        solarParticles.push({
+          angle: cmeAngle + spread,
+          distance: sunRadius * 1.2,
+          speed: Math.random() * 1.5 + 1,
+          size: Math.random() * 1.5 + 0.5,
+          opacity: Math.random() * 0.6 + 0.4,
+          life: 1,
+          maxLife: Math.random() * 1500 + 1000,
+          type: 'cme',
+        });
+      }
+    }
+
+    function updateSolarParticles(deltaTime, sunRadius) {
+      const currentTime = Date.now();
+
+      // Update particles
+      solarParticles = solarParticles.filter(particle => {
+        particle.life -= deltaTime / particle.maxLife;
+
+        if (particle.type === 'flare') {
+          particle.arcProgress += particle.speed * deltaTime * 0.001;
+          const t = Math.min(particle.arcProgress, 1);
+          particle.distance = sunRadius + particle.arcHeight * Math.sin(t * Math.PI);
+          particle.opacity = particle.life;
+        } else if (particle.type === 'cme') {
+          particle.distance += particle.speed * deltaTime * 0.05;
+          particle.opacity = particle.life * 0.7;
+        } else if (particle.type === 'corona') {
+          particle.angle += particle.speed * deltaTime * 0.0001;
+          particle.distance += Math.sin(currentTime * 0.001 + particle.angle) * 0.1;
+          particle.opacity = particle.life * 0.4;
+        }
+
+        return particle.life > 0;
+      });
+
+      // Update flares
+      solarFlares = solarFlares.filter(flare => {
+        const age = currentTime - flare.startTime;
+        if (age > flare.duration) return false;
+
+        flare.particles = flare.particles.filter(p => {
+          p.life -= deltaTime / p.maxLife;
+          p.arcProgress += p.speed * deltaTime * 0.001;
+          const t = Math.min(p.arcProgress, 1);
+          p.distance = sunRadius + p.arcHeight * Math.sin(t * Math.PI);
+          p.opacity = p.life * flare.intensity;
+          return p.life > 0;
+        });
+
+        return true;
+      });
+
+      // Maintain corona
+      const coronaCount = solarParticles.filter(p => p.type === 'corona').length;
+      if (coronaCount < CONFIG.CORONA_PARTICLES) {
+        for (let i = 0; i < 5; i++) {
+          solarParticles.push({
+            angle: Math.random() * Math.PI * 2,
+            distance: sunRadius * (1 + Math.random() * 0.3),
+            speed: Math.random() * 0.5 + 0.2,
+            size: Math.random() * 1.5 + 0.5,
+            opacity: Math.random() * 0.3 + 0.2,
+            life: 1,
+            maxLife: Math.random() * 3000 + 2000,
+            type: 'corona',
+          });
+        }
+      }
+    }
+
+    function drawEarth(x, y, radius, rotation, tilt) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(tilt);
+
+      // Earth base
+      ctx.fillStyle = '#0a0a0a';
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Terminator gradient
+      const terminatorGradient = ctx.createLinearGradient(-radius, 0, radius, 0);
+      terminatorGradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      terminatorGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.6)');
+      terminatorGradient.addColorStop(1, 'rgba(255, 255, 255, 0.1)');
+      ctx.fillStyle = terminatorGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Continents
+      ctx.save();
+      ctx.rotate(rotation);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.lineWidth = 0.5;
+
+      // Africa
+      ctx.beginPath();
+      ctx.moveTo(radius * 0.05, radius * -0.3);
+      ctx.lineTo(radius * 0.2, radius * -0.1);
+      ctx.lineTo(radius * 0.25, radius * 0.2);
+      ctx.lineTo(radius * 0.15, radius * 0.5);
+      ctx.lineTo(radius * -0.05, radius * 0.4);
+      ctx.lineTo(radius * -0.1, radius * 0.1);
+      ctx.lineTo(radius * 0.05, radius * -0.3);
+      ctx.stroke();
+
+      // Europe
+      ctx.beginPath();
+      ctx.moveTo(radius * 0.05, radius * -0.35);
+      ctx.lineTo(radius * 0.15, radius * -0.4);
+      ctx.lineTo(radius * 0.2, radius * -0.35);
+      ctx.stroke();
+
+      // Asia
+      ctx.beginPath();
+      ctx.moveTo(radius * 0.25, radius * -0.35);
+      ctx.quadraticCurveTo(radius * 0.4, radius * -0.2, radius * 0.5, radius * 0);
+      ctx.lineTo(radius * 0.45, radius * 0.15);
+      ctx.stroke();
+
+      // Americas
+      ctx.beginPath();
+      ctx.moveTo(radius * -0.5, radius * -0.3);
+      ctx.quadraticCurveTo(radius * -0.45, radius * -0.1, radius * -0.4, radius * 0.1);
+      ctx.lineTo(radius * -0.45, radius * 0.4);
+      ctx.stroke();
+
+      ctx.restore();
+
+      // Atmospheric glow
+      const glowGradient = ctx.createRadialGradient(0, 0, radius * 0.95, 0, 0, radius * 1.15);
+      glowGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      glowGradient.addColorStop(0.8, 'rgba(255, 255, 255, 0)');
+      glowGradient.addColorStop(1, 'rgba(255, 255, 255, 0.3)');
+      ctx.fillStyle = glowGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 1.15, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outline
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawMoon(x, y, radius, rotation) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rotation);
+
+      // Moon gradient
+      const moonGradient = ctx.createRadialGradient(
+        radius * -0.2, radius * -0.2, 0,
+        0, 0, radius
+      );
+      moonGradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+      moonGradient.addColorStop(0.7, 'rgba(200, 200, 200, 0.7)');
+      moonGradient.addColorStop(1, 'rgba(150, 150, 150, 0.5)');
+      ctx.fillStyle = moonGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Maria
+      ctx.fillStyle = 'rgba(100, 100, 100, 0.4)';
+      ctx.beginPath();
+      ctx.arc(radius * -0.2, radius * -0.1, radius * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(radius * 0.15, radius * -0.15, radius * 0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(radius * 0.1, radius * 0.1, radius * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Craters
+      ctx.strokeStyle = 'rgba(180, 180, 180, 0.5)';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const dist = radius * (0.4 + Math.random() * 0.4);
+        const craterRadius = radius * (0.05 + Math.random() * 0.1);
+        ctx.beginPath();
+        ctx.arc(Math.cos(angle) * dist, Math.sin(angle) * dist, craterRadius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Outline
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawSun(x, y, radius) {
+      ctx.save();
+      ctx.translate(x, y);
+
+      // Volumetric rays
+      const rayCount = 12;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < rayCount; i++) {
+        const angle = (i / rayCount) * Math.PI * 2 + Date.now() * 0.0001;
+        const length = radius * (1.5 + Math.sin(Date.now() * 0.001 + i) * 0.3);
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(angle) * radius * 1.1, Math.sin(angle) * radius * 1.1);
+        ctx.lineTo(Math.cos(angle) * length, Math.sin(angle) * length);
+        ctx.stroke();
+      }
+
+      // Sun core
+      const sunGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, radius);
+      sunGradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      sunGradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.8)');
+      sunGradient.addColorStop(1, 'rgba(255, 255, 255, 0.4)');
+      ctx.fillStyle = sunGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Outline
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Corona
+      const coronaGradient = ctx.createRadialGradient(0, 0, radius * 0.9, 0, 0, radius * 1.5);
+      coronaGradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      coronaGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.15)');
+      coronaGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = coronaGradient;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawSolarParticles(sunX, sunY) {
+      const allParticles = [...solarParticles, ...solarFlares.flatMap(f => f.particles)];
+      allParticles.forEach(particle => {
+        const px = sunX + Math.cos(particle.angle) * particle.distance;
+        const py = sunY + Math.sin(particle.angle) * particle.distance;
+
+        const gradient = ctx.createRadialGradient(px, py, 0, px, py, particle.size * 2);
+        gradient.addColorStop(0, `rgba(255, 255, 255, ${particle.opacity})`);
+        gradient.addColorStop(0.5, `rgba(220, 230, 255, ${particle.opacity * 0.6})`);
+        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(px, py, particle.size * 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+
+    function animate() {
+      const width = canvas.width;
+      const height = canvas.height;
+      const centerX = width / 2;
+      const centerY = height / 2;
+
+      const sunRadius = width * CONFIG.SUN_RADIUS_RATIO;
+      const earthRadius = width * CONFIG.EARTH_RADIUS_RATIO;
+      const moonRadius = width * CONFIG.MOON_RADIUS_RATIO;
+      const earthOrbitRadius = width * CONFIG.EARTH_ORBIT_RATIO;
+      const moonOrbitRadius = earthRadius + width * CONFIG.MOON_ORBIT_RATIO;
+
+      // Clear
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+
+      // Stars
+      stars.forEach(star => {
+        star.twinklePhase += star.twinkleSpeed;
+        const twinkle = Math.sin(star.twinklePhase) * 0.2 + 0.8;
+        ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity * twinkle})`;
+        ctx.beginPath();
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      // Update angles
+      earthAngle += CONFIG.EARTH_ORBIT_SPEED;
+      moonAngle += CONFIG.MOON_ORBIT_SPEED;
+      earthRotation += CONFIG.EARTH_ROTATION_SPEED;
+      moonRotation += CONFIG.MOON_ROTATION_SPEED;
+
+      // Positions
+      const earthX = centerX + Math.cos(earthAngle) * earthOrbitRadius;
+      const earthY = centerY + Math.sin(earthAngle) * earthOrbitRadius * 0.4;
+      const moonX = earthX + Math.cos(moonAngle) * moonOrbitRadius;
+      const moonY = earthY + Math.sin(moonAngle) * moonOrbitRadius * Math.cos(CONFIG.MOON_ORBITAL_INCLINATION);
+
+      // Orbits
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY, earthOrbitRadius, earthOrbitRadius * 0.4, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.ellipse(earthX, earthY, moonOrbitRadius, moonOrbitRadius * Math.cos(CONFIG.MOON_ORBITAL_INCLINATION), 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Update particles
+      updateSolarParticles(16, sunRadius);
+
+      // Flare timing
+      const currentTime = Date.now();
+      if (currentTime - lastFlareTime > CONFIG.FLARE_INTERVAL) {
+        createSolarFlare(sunRadius);
+        if (Math.random() > 0.7) createCME(sunRadius);
+        lastFlareTime = currentTime;
+      }
+
+      // Draw
+      drawSun(centerX, centerY, sunRadius);
+      drawSolarParticles(centerX, centerY);
+      drawEarth(earthX, earthY, earthRadius, earthRotation, CONFIG.EARTH_AXIAL_TILT);
+      drawMoon(moonX, moonY, moonRadius, moonRotation);
+
+      requestAnimationFrame(animate);
+    }
+
+    // Start
+    init();
+  </script>
+</body>
+</html>

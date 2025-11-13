@@ -1,0 +1,19 @@
+services:
+  # Chris Cole Portfolio Website
+  - type: web
+    name: chris-cole-portfolio
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SITE_URL
+        sync: false  # Set to your production URL
+    
+    # Health check endpoint
+    healthCheckPath: /
+    
+    # Auto-deploy on push
+    autoDeploy: true
