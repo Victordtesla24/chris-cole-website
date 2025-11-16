@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BPHS BTR Prototype</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <h1>Birth Time Rectification (BPHS Prototype)</h1>
+  <p class="subtitle">Based on Brihat Parashara Hora Shastra - Chapter 4</p>
+  
+  <form id="btr-form">
+    <fieldset>
+      <legend>Required Information</legend>
+      <div>
+        <label for="dob">Date of Birth:</label>
+        <input type="date" id="dob" name="dob" required>
+      </div>
+      <div>
+        <label for="pob">Place of Birth:</label>
+        <input type="text" id="pob" name="pob" placeholder="City, Country" required>
+        <small>Example: Sialkot, Pakistan</small>
+      </div>
+      <div>
+        <label for="tz-select">Time Zone:</label>
+        <select id="tz-select" onchange="updateTzOffset()">
+          <option value="5.0">Asia/Karachi (UTC+5)</option>
+          <option value="5.5">Asia/Kolkata (UTC+5:30)</option>
+          <option value="0.0">UTC (UTC+0)</option>
+          <option value="-5.0">America/New_York (UTC-5)</option>
+          <option value="custom">Custom Offset</option>
+        </select>
+      </div>
+      <div id="tz-custom" style="display: none;">
+        <label for="tz">Time Zone Offset (hours from UTC):</label>
+        <input type="number" step="0.5" id="tz" name="tz" value="0" required>
+        <small>Positive for east of UTC, negative for west</small>
+      </div>
+      <div>
+        <label>Approximate Time of Birth:</label>
+        <select id="tob-mode" onchange="toggleTobFields()">
+          <option value="unknown">Unknown (full 24h search)</option>
+          <option value="approx">Approximate Time</option>
+        </select>
+        <div id="tob-approx-fields" style="display: none; margin-top: 10px;">
+          <input type="time" id="tob-center" value="12:00" placeholder="Center time">
+          <label for="tob-window">± Hours:</label>
+          <input type="number" id="tob-window" step="0.5" value="3" min="0.5" max="12">
+        </div>
+      </div>
+      <div>
+        <label>Time Range Override (optional):</label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="time" id="override-start" placeholder="Start">
+          <span>to</span>
+          <input type="time" id="override-end" placeholder="End">
+        </div>
+        <small>If provided, overrides approximate time settings</small>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Optional: Physical Traits (for future verification)</legend>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+        <div>
+          <label for="height">Height:</label>
+          <select id="height">
+            <option value="">Not specified</option>
+            <option value="SHORT">Short</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="TALL">Tall</option>
+          </select>
+        </div>
+        <div>
+          <label for="build">Build:</label>
+          <select id="build">
+            <option value="">Not specified</option>
+            <option value="SLIM">Slim</option>
+            <option value="ATHLETIC">Athletic</option>
+            <option value="HEAVY">Heavy</option>
+          </select>
+        </div>
+        <div>
+          <label for="complexion">Complexion:</label>
+          <select id="complexion">
+            <option value="">Not specified</option>
+            <option value="FAIR">Fair</option>
+            <option value="WHEATISH">Wheatish</option>
+            <option value="DARK">Dark</option>
+          </select>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Optional: Life Events (for future verification)</legend>
+      <div>
+        <label for="marriage-date">Marriage Date:</label>
+        <input type="date" id="marriage-date">
+      </div>
+      <div>
+        <label for="children-count">Number of Children:</label>
+        <input type="number" id="children-count" min="0" value="0">
+      </div>
+      <div id="children-dates-container" style="display: none;">
+        <label>Children Birth Dates:</label>
+        <div id="children-dates-list"></div>
+      </div>
+      <div>
+        <label for="career-events">Major Career Events (comma-separated dates):</label>
+        <input type="text" id="career-events" placeholder="YYYY-MM-DD, YYYY-MM-DD">
+        <small>First job, promotions, job changes, etc.</small>
+      </div>
+    </fieldset>
+
+    <button type="submit">Calculate BTR</button>
+  </form>
+
+  <div id="result-container" style="display: none;">
+    <h2>BTR Results</h2>
+    
+    <div class="result-section">
+      <h3>Location Information</h3>
+      <div id="geocode-info"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>Best Candidate</h3>
+      <div id="best-candidate"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>All Candidates</h3>
+      <div id="candidates-list"></div>
+    </div>
+
+    <div class="result-section">
+      <h3>Search Configuration</h3>
+      <div id="search-config"></div>
+    </div>
+
+    <div class="result-section">
+      <button id="export-json" class="export-btn">Export Results as JSON</button>
+    </div>
+  </div>
+
+  <div id="error-message" style="display: none;" class="error"></div>
+
+  <div id="loading" style="display: none;" class="loading">
+    <div class="spinner"></div>
+    <p>Calculating BTR using BPHS methods...</p>
+    <p class="loading-detail">This may take a few moments</p>
+  </div>
+
+  <script>
+    function updateTzOffset() {
+      const select = document.getElementById('tz-select');
+      const customDiv = document.getElementById('tz-custom');
+      const tzInput = document.getElementById('tz');
+      
+      if (select.value === 'custom') {
+        customDiv.style.display = 'block';
+        tzInput.required = true;
+      } else {
+        customDiv.style.display = 'none';
+        tzInput.value = select.value;
+        tzInput.required = false;
+      }
+    }
+
+    function toggleTobFields() {
+      const mode = document.getElementById('tob-mode').value;
+      const fields = document.getElementById('tob-approx-fields');
+      if (mode === 'approx') {
+        fields.style.display = 'block';
+      } else {
+        fields.style.display = 'none';
+      }
+    }
+
+    document.getElementById('children-count').addEventListener('change', function() {
+      const count = parseInt(this.value) || 0;
+      const container = document.getElementById('children-dates-container');
+      const list = document.getElementById('children-dates-list');
+      
+      if (count > 0) {
+        container.style.display = 'block';
+        list.innerHTML = '';
+        for (let i = 0; i < count; i++) {
+          const div = document.createElement('div');
+          div.style.marginBottom = '10px';
+          div.innerHTML = `
+            <label>Child ${i + 1} Birth Date:</label>
+            <input type="date" class="child-date" data-index="${i}">
+          `;
+          list.appendChild(div);
+        }
+      } else {
+        container.style.display = 'none';
+      }
+    });
+  </script>
+  <script src="/app.js"></script>
+</body>
+</html>
