@@ -1,85 +1,23 @@
 # BPHS Birth Time Rectification (BTR) Prototype
 
-A minimal but accurate web application for Birth Time Rectification based strictly on **Brihat Parashara Hora Shastra (BPHS)** verses from Chapter 4 - लग्नाध्याय (Lagna Adhyaya).
+A FastAPI + Swiss Ephemeris backend with a static React (Vite) frontend. The engine implements only the Birth Time Rectification rules that are explicitly present in **Brihat Parashara Hora Shastra (BPHS) – Chapter 4** and serves two endpoints: `/api/geocode` and `/api/btr`.
 
-## Overview
+## Current Implementation (code facts)
 
-This prototype implements the canonical BPHS-based rectification methods strictly following **Brihat Parashara Hora Shastra (BPHS)** Chapter 4 - लग्नाध्याय (Lagna Adhyaya). **Only rules explicitly appearing in these verses are used** - no other texts, commentaries, or invented rules.
-
-### Complete BPHS Verse Implementation List
-
-#### Chapter 4: लग्नाध्याय (Lagna Adhyaya)
-
-**Section 1: Gulika Calculation (गुलिक गणना)**
-- **BPHS 4.1**: रविवारादिशन्यन्तं गुलिकादि निरूप्यते। दिवसानष्टधा कृत्वा वारेशाद्मणयेत््रमात्।
-  - Divide day duration into 8 parts, count from weekday lord
-- **BPHS 4.2**: अष्छ्मषो निरीशः स्याच्छन्यंशो गुरिकः स्मृतः। रात्रिरष्यष्टधा भक्त्वा वःरर््पञ्चनादतः।
-  - 8th portion has no lord (Niresha); Saturn's portion = Gulika. For night, count from 5th weekday lord
-- **BPHS 4.3**: शन्यशो गुलिकः प्रोक्तो गुर्वंशो यमघण्टकः।
-  - Saturn's portion = Gulika, Jupiter's portion = Yamaghantaka
-
-**Section 2: Pranapada Calculation (प्राणपद गणना)**
-- **BPHS 4.5**: घटी चतुर्गुणा कार्यां तिथ्याप्तैश्च पलैर्युताः। दिनकरेणापहतं शेषं प्राणपदं स्मृतम्।
-  - **Madhya Pranapada (Rough)**: Multiply ghatis × 4, add palas ÷ 15, divide by 12
-- **BPHS 4.6**: शेषात्यलान्तादिहवगुणी विधाय राश्यंशसूर्यक्षनियोजिताच। तत्रापि तद्राशिच्छान् क्रमेण लग्न साशपदेक्यता स्यात्।
-  - **Degree Matching**: Lagna degrees and Pranapada degrees should be equal (पदैक्यता)
-- **BPHS 4.7**: अथच--स्वेष्टकालं पलीकृत्य तिथ्याप्तं भादिकं च यत्। चरागद्विभके भानौ योज्यं स्वे नवमे सुते।
-  - **Sphuta Pranapada (Accurate)**: Convert to palas, divide by 15, add based on Sun's rashi nature (Chara/Sthira/Dvisvabhava)
-- **BPHS 4.8**: विना प्राणपदाच्छुद्धो गुलिकाद्वा निशाकराद्। तदशद्धं विजानीयात्स्थावराणां तदेव हि।
-  - **Triple Verification**: Must be verified by Pranapada OR Gulika OR Moon
-- **BPHS 4.10**: प्राणपदं को राशि से त्रिकोण राशि मे मनुष्यों के जन्मलग्न की राशि होती है।
-  - **Trine Rule (MANDATORY)**: Birth lagna must be in trine (1st, 5th, or 9th) from Pranapada for humans
-- **BPHS 4.11**: तृतीये मदने लाभे विहङ्गानां विनिदिशेत्।
-  - Confirms that only 1st/5th/9th positions from Pranapada apply to humans
-
-**Section 3: Special Lagnas (विशेष लग्न)**
-- **BPHS 4.18**: सूर्योदयात्समारभ्य घटीपञ्च प्रमाणतः। जन्मेष्टकालपर्यन्तं गणनीयं प्रयत्नतः।
-  - **Bhava Lagna**: Every 5 ghatis = 1 sign progression
-- **BPHS 4.20-21**: सार्धद्विष्ठटिक्छा विप्र कालादिति विलग्नभात्।
-  - **Hora Lagna**: Every 2.5 ghatis = 1 sign progression
-- **BPHS 4.22-24**: सूर्योदयात्समारभ्य जन्मकालावधि क्रमात्। एकैकं घटिकांमानांल्लग्नं राश्यादिकं च यत्।
-  - **Ghati Lagna**: 1 ghati = 1 sign (30°), 1 pala = 2 degrees
-- **BPHS 4.26-28**: जन्महोराख्यलग्नक्षसंख्या ग्राह्या पृथक् पृथक्। ओजे लग्ने त्वेकयुग्मे चक्रशुद्धैकसंयुता।
-  - **Varnada Lagna**: Complex calculation from Janma + Hora lagnas
-
-**Section 4: Nisheka Lagna (निषेक लग्न)**
-- **BPHS 4.12-16**: Conception time calculation
-- **BPHS 4.14**: यस्मिन् भावे स्थितो कोणस्तस्य मान्देर्यदन्तरम्। लग्नभाग्यन्तरं योज्यं यच्च राश्यादि जायते।
-  - Calculate gestation period using Saturn, Gulika, and 9th house
-
-**Additional BPHS References:**
-- **BPHS Chapter 2**: Physical traits by lagna sign and planets (Verses 2.3-2.23)
-- **BPHS Chapter 12**: Life events timing and verification (Verses 12.23, 12.35, 12.206, 12.211)
-- **Vimshottari Dasha**: Primary dasha system mentioned throughout BPHS
-
-### Implementation Summary
-
-1. **Gulika Calculation** (BPHS 4.1-4.3) - Primary verification method
-2. **Pranapada Calculation** (BPHS 4.5, 4.7) - Primary rectification metric
-   - Method 1: Madhya Pranapada (Rough) - BPHS 4.5
-   - Method 2: Sphuta Pranapada (Accurate) - BPHS 4.7 - **Used for rectification**
-3. **Hard BPHS Filters**:
-   - Trine Rule (BPHS 4.10) - **Mandatory** for human births
-   - Degree Matching (BPHS 4.6)
-   - Triple Verification (BPHS 4.8)
-4. **Special Lagnas** (BPHS 4.18-28) - Secondary verification
-   - Bhava Lagna (BPHS 4.18)
-   - Hora Lagna (BPHS 4.20-21)
-   - Ghati Lagna (BPHS 4.22-24)
-   - Varnada Lagna (BPHS 4.26-28)
-5. **Nisheka Lagna** (BPHS 4.12-16) - Gestation verification
-6. **Vimshottari Dasha** - Life events timing verification
-7. **Divisional Charts** (D-3, D-7, D-9, D-10, D-12, D-60) - Event verification
-8. **Physical Traits Scoring** (BPHS Chapter 2) - Height, build, complexion matching
-9. **Life Events Verification** - Marriage, children, career timing validation
-10. **Enhanced Composite Scoring** - Weighted scoring incorporating all factors
+- **Strict BPHS filters**: Trine rule (BPHS 4.10) + padekyatā degree equality (BPHS 4.6) enforced at palā granularity (~0.2° in `strict_bphs` mode) + purification anchor (BPHS 4.8). Non-human classifications are returned with rejection reasons.  
+- **Gulika + Pranapada**: Day/night Gulika from sunrise/sunset (BPHS 4.1–4.3). Both Madhya (4.5) and Sphuṭa (4.7) Pranapada are computed; Sphuṭa is used for filtering, Madhya is reported.  
+- **Search resolution**: 2‑minute sweep across the requested window (`backend/main.py:342-405`) with optional palā‑by‑palā śodhana up to 3 600 palās (24 s each) when strict filters fail (`backend/btr_core.py:150-210`).  
+- **Outputs per candidate**: BPHS score (ordering key), Sphuṭa/Madhya Pranapada deltas, purification anchor, special lagnas (Bhava/Hora/Ghati/Varnada), Nisheka lagna + gestation check, optional trait and life‑event scores, optional śodhana offsets.  
+- **Scoring**: `composite_score` equals the BPHS score (40% trine, 30% degree match, 30% purification). Physical traits, life events, and gestation heuristics are computed and exposed but **not used for ordering** when `bphs_only_ordering=True` (API default).  
+- **Frontend requirement**: `frontend-react/dist` **must exist**; the backend raises at import time if the build is missing (`backend/main.py:66-83`).  
+- **Geocoding**: OpenCage API; response includes `tz_offset_hours` and `timezone_name` when available (`backend/main.py:257-314`).
 
 ## Architecture
 
 - **Backend**: Python 3.10+ with FastAPI
 - **Astro Engine**: Swiss Ephemeris (pyswisseph) with Lahiri Ayanamsa
 - **Geocoding**: OpenCage API
-- **Frontend**: React + TypeScript (Vite)
+- **Frontend**: React + TypeScript (Vite) built into `frontend-react/dist` and served by FastAPI
 
 ## Installation
 
@@ -114,14 +52,23 @@ OPENCAGE_API_KEY=your_api_key_here
 EPHE_PATH=  # Optional: path to Swiss Ephemeris data files
 ```
 
-5. **Run the backend server**:
+5. **Build the frontend (required even for API-only use)**:
+```bash
+cd frontend-react
+npm install
+npm run build
+cd ..
+```
+`backend/main.py` will raise a runtime error if `frontend-react/dist/index.html` is missing.
+
+6. **Run the backend server**:
 ```bash
 uvicorn backend.main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`
 
-6. **Set up and run the frontend**:
+7. **Optional: run the frontend dev server**:
 ```bash
 cd frontend-react
 npm install
@@ -136,7 +83,7 @@ The frontend will be available at `http://localhost:5173` (Vite default port)
 
 ### GET `/api/geocode?q=<place>`
 
-Geocode a place name to get latitude/longitude using OpenCage API.
+Geocode a place name to latitude/longitude using OpenCage.
 
 **Example**:
 ```bash
@@ -148,138 +95,90 @@ curl "http://localhost:8000/api/geocode?q=Sialkot,%20Pakistan"
 {
   "lat": 32.4945,
   "lon": 74.5229,
-  "formatted": "Sialkot, Punjab, Pakistan"
+  "formatted": "Sialkot, Punjab, Pakistan",
+  "tz_offset_hours": 5.0,
+  "timezone_name": "Asia/Karachi"
 }
 ```
 
-**Error Responses**:
-- `404`: Location not found
-- `500`: OpenCage API key not configured or API error
-
 ### POST `/api/btr`
 
-Perform birth time rectification using BPHS methods.
+Perform BPHS-based birth time rectification.
 
-**Request Body** (all fields required except optional_*):
+**Request body** (required unless noted):
 ```json
 {
   "dob": "1997-12-18",
   "pob_text": "Sialkot, Pakistan",
   "tz_offset_hours": 5.0,
   "approx_tob": {
-    "mode": "unknown",
-    "center": null,
-    "window_hours": null
+    "mode": "approx",         // "unknown" covers full 00:00–23:59
+    "center": "11:00",        // HH:MM, default "12:00"
+    "window_hours": 3.0       // +/- hours, default 3
   },
-  "time_range_override": null,
+  "time_range_override": null, // {"start": "08:00", "end": "14:00"} if you want to override approx_tob
   "optional_traits": {
-    "height": "TALL",
+    "height": "TALL",          // or height_cm/feet/inches, build/build_band, complexion/complexion_tone
     "build": "ATHLETIC",
     "complexion": "WHEATISH"
   },
   "optional_events": {
-    "marriage": {
-      "date": "2020-05-15"
-    },
-    "children": {
-      "count": 1,
-      "dates": ["2021-08-20"]
-    },
-    "career": ["2018-06-01", "2022-03-15"]
+    "marriage": {"date": "2020-05-15"},
+    "marriages": [{"date": "2020-05-15"}],
+    "children": {"count": 1, "dates": ["2021-08-20"]},
+    "career": ["2018-06-01", "2022-03-15"],
+    "major": [{"date": "2022-01-01", "title": "Relocation"}]
   }
 }
 ```
 
-**Request with approximate time**:
-```json
-{
-  "dob": "1997-12-18",
-  "pob_text": "Delhi, India",
-  "tz_offset_hours": 5.5,
-  "approx_tob": {
-    "mode": "approx",
-    "center": "11:00",
-    "window_hours": 3.0
-  },
-  "time_range_override": null,
-  "optional_traits": null,
-  "optional_events": null
-}
-```
-
-**cURL Example**:
-```bash
-curl -X POST http://localhost:8000/api/btr \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dob": "1997-12-18",
-    "pob_text": "Sialkot, Pakistan",
-    "tz_offset_hours": 5.0,
-    "approx_tob": {
-      "mode": "approx",
-      "center": "11:00",
-      "window_hours": 3.0
-    }
-  }'
-```
-
-**Response**:
+**Response shape (trimmed)**:
 ```json
 {
   "engine_version": "bphs-btr-prototype-v1",
-  "geocode": {
-    "lat": 32.4945,
-    "lon": 74.5229,
-    "formatted": "Sialkot, Punjab, Pakistan"
-  },
+  "geocode": { "lat": 32.4945, "lon": 74.5229, "formatted": "Sialkot, Punjab, Pakistan" },
   "search_config": {
-    "step_minutes": 10,
-    "time_window_used": {
-      "start_local": "08:00",
-      "end_local": "14:00"
-    }
+    "step_minutes": 2,
+    "time_window_used": { "start_local": "08:00", "end_local": "14:00" }
   },
   "candidates": [
     {
       "time_local": "1997-12-18T11:23:00",
       "lagna_deg": 247.2,
       "pranapada_deg": 248.0,
+      "madhya_pranapada_deg": 247.8,
       "delta_pp_deg": 0.8,
       "passes_trine_rule": true,
+      "purification_anchor": "pranapada",
       "verification_scores": {
         "degree_match": 84.0,
         "gulika_alignment": 72.0,
         "moon_alignment": 68.0,
-        "combined_verification": 84.0
+        "combined_verification": 84.0,
+        "passes_padekyata_sphuta": true,
+        "passes_padekyata_madhya": true
       },
-      "special_lagnas": {
-        "bhava_lagna": 285.5,
-        "hora_lagna": 312.3,
-        "ghati_lagna": 298.7,
-        "varnada_lagna": 45.0
-      },
-      "nisheka": {
-        "nisheka_lagna_deg": 217.2,
-        "gestation_months": 9.0,
-        "is_realistic": true,
-        "gestation_score": 100.0
-      },
-      "composite_score": 85.2,
-      "physical_traits_scores": {
-        "height": 100.0,
-        "build": 80.0,
-        "complexion": 90.0,
-        "overall": 90.0
-      },
-      "life_events_scores": {
-        "marriage": 85.0,
-        "children": 75.0,
-        "career": 80.0,
-        "overall": 80.0
-      }
+      "bphs_score": 85.2,
+      "heuristic_score": 40.0,
+      "special_lagnas": {...},
+      "nisheka": {...},
+      "physical_traits_scores": {...},
+      "life_events_scores": {...},
+      "composite_score": 85.2
     }
   ],
-  "best_candidate": { ... }
+  "best_candidate": { ... },
+  "rejections": [
+    {
+      "time_local": "1997-12-18T10:45:00",
+      "lagna_deg": 240.0,
+      "pranapada_deg": 260.0,
+      "passes_trine_rule": false,
+      "passes_purification": false,
+      "non_human_classification": "pashu",
+      "rejection_reason": "Non-human per BPHS 4.10-4.11 (pashu)"
+    }
+  ]
 }
 ```
 
@@ -317,49 +216,33 @@ curl -X POST http://localhost:8000/api/btr \
 
 ### 3. Hard Filters
 
-**Trine Rule (BPHS 4.10)** - **MANDATORY**:
-- Birth Lagna must be in 1st, 5th, or 9th from Pranapada
-- If not satisfied → Rejected (not human birth per BPHS)
+**Trine Rule (BPHS 4.10) – mandatory**  
+Lagna must be 1st/5th/9th from Pranapada or the candidate is classified as non-human.
 
-**Degree Matching (BPHS 4.6)**:
-- Lagna degrees ≈ Pranapada degrees
-- Tolerance: ±2° (configurable)
+**Degree matching (BPHS 4.6)**  
+Padekyatā enforced at palā resolution (~0.2° in strict mode). Both Sphuṭa and Madhya Pranapada must align when provided.
 
-**Triple Verification (BPHS 4.8)**:
-- Must satisfy at least one:
-  - Pranapada alignment
-  - Gulika alignment
-  - Moon alignment
+**Triple verification (BPHS 4.8)**  
+Purification anchor must be Pranapada else Moon else Gulika (or its 7th); otherwise rejected.
 
 ### 4. Enhanced Scoring System
 
-**Composite Score Calculation**:
-- BPHS hard filters: 50% (degree_match: 20%, trine: 15%, verification: 15%)
-- Physical traits: 20% (if provided)
-- Life events: 20% (if provided)
-- Nisheka: 10%
+**BPHS Score (ordering key)**  
+`0.4 * trine_pass (0/100) + 0.3 * degree_match + 0.3 * combined_verification`
+
+**Heuristic Score (reported only)**  
+`0.4 * traits_overall + 0.4 * events_overall + 0.2 * gestation_score` (not used for ordering when `bphs_only_ordering=True`).
 
 **Physical Traits Scoring (BPHS Chapter 2)**:
 - Height: Based on lagna sign (Large/Medium/Small body types)
 - Build: Based on lagnesh and planets in lagna (Athletic/Slim/Heavy)
 - Complexion: Based on planets in lagna (Fair/Wheatish/Dark)
 
-**Life Events Verification**:
-- **Marriage**: Verified using D-9 (Navamsa) 7th house and Vimshottari dasha timing
-- **Children**: Verified using D-7 (Saptamsa) 5th house and dasha timing
-- **Career**: Verified using D-10 (Dasamsa) 10th house and dasha timing (BPHS 12.211)
-
-**Vimshottari Dasha**:
-- Calculates Mahadasha-Antardasha at event dates
-- Verifies alignment with favorable planetary periods for each event type
-
-**Divisional Charts**:
-- D-3 (Drekkana): Siblings, courage
-- D-7 (Saptamsa): Children
-- D-9 (Navamsa): Marriage, spouse
-- D-10 (Dasamsa): Career, profession
-- D-12 (Dwadasamsa): Parents, family
-- D-60 (Shashtiamsa): Detailed analysis
+**Life Events Verification (optional heuristics)**:
+- Marriage: D-9 7th house + Vimshottari dasha alignment.
+- Children: D-7 5th house + dasha alignment.
+- Career: D-10 10th lord strength + dasha alignment.
+- Major events: dasha alignment heuristic only.
 
 ## Testing
 
@@ -368,80 +251,16 @@ Run all tests:
 pytest tests/
 ```
 
-Run specific test file:
+Specific files:
 ```bash
 pytest tests/test_btr_core.py
 pytest tests/test_main.py
 ```
 
-Run with verbose output:
-```bash
-pytest -v tests/
-```
-
-Run with coverage:
+With coverage:
 ```bash
 pytest --cov=backend tests/
 ```
-
-## Example Usage
-
-### Example 1: Unknown Birth Time (Full 24h Search)
-
-```bash
-curl -X POST http://localhost:8000/api/btr \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dob": "1990-05-15",
-    "pob_text": "Mumbai, India",
-    "tz_offset_hours": 5.5,
-    "approx_tob": {
-      "mode": "unknown"
-    }
-  }'
-```
-
-This will search the entire 24-hour period (00:00 to 23:59) for valid birth times.
-
-### Example 2: Approximate Time Known
-
-```bash
-curl -X POST http://localhost:8000/api/btr \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dob": "1985-08-20",
-    "pob_text": "London, UK",
-    "tz_offset_hours": 0.0,
-    "approx_tob": {
-      "mode": "approx",
-      "center": "14:30",
-      "window_hours": 2.0
-    }
-  }'
-```
-
-This searches from 12:30 to 16:30 (2 hours before and after 14:30).
-
-### Example 3: Explicit Time Range
-
-```bash
-curl -X POST http://localhost:8000/api/btr \
-  -H "Content-Type: application/json" \
-  -d '{
-    "dob": "1992-03-10",
-    "pob_text": "New York, USA",
-    "tz_offset_hours": -5.0,
-    "approx_tob": {
-      "mode": "unknown"
-    },
-    "time_range_override": {
-      "start": "08:00",
-      "end": "12:00"
-    }
-  }'
-```
-
-This overrides the approximate time settings and searches only from 08:00 to 12:00.
 
 ## Deployment
 
@@ -449,13 +268,13 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions on free-
 
 ## Limitations & Notes
 
-- This is a **prototype** for educational and research purposes
-- Physical traits and life events scoring is fully implemented and used in composite scoring
-- Step size for time search is configurable (default: 10 minutes in code, can be adjusted)
-- Swiss Ephemeris data files are included with pyswisseph package; no separate download needed
-- Free-tier hosting platforms may have timeout limits for long searches (full 24h with 2-minute steps)
-- OpenCage API has free tier limits: 2,500 requests/day
-- Frontend requires Node.js 18+ for development; production build can be served statically
+- Prototype engine; BPHS-only filters are strict and may reject broad windows if padekyatā fails.
+- `composite_score` mirrors the BPHS score; trait/event/gestation heuristics are informational only by default.
+- Search step is fixed at 2 minutes from the API entry-point; palā‑level śodhana can promote nearby times.
+- Swiss Ephemeris data files ship with pyswisseph; set `EPHE_PATH` only when using a custom ephemeris location.
+- Free-tier platforms may time out if the search window is very wide.
+- OpenCage API has free-tier limits (~2,500 requests/day).
+- Node.js 18+ is needed for frontend builds; the backend will refuse to start without a built `frontend-react/dist`.
 
 ## Troubleshooting
 
@@ -469,7 +288,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions on free-
 **Possible reasons**:
 - Time range too narrow
 - All candidates failed BPHS trine rule (BPHS 4.10) - not human birth per BPHS
-- Step size too large (try smaller steps like 2-5 minutes)
+- Step size is fixed at 2 minutes via the API; widen the window or adjust `step_minutes` in `backend/main.py` if experimenting
 
 ### Issue: Build fails on deployment platform
 **Solution**: 
@@ -479,17 +298,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions on free-
 
 ## BPHS Compliance
 
-This implementation follows **strict BPHS-only compliance**:
-
-- ✅ All formulas match exact BPHS verses from Chapter 4
-- ✅ No non-BPHS rules or heuristics implemented
-- ✅ All code functions include BPHS verse citations
-- ✅ Frontend displays BPHS-based justifications
-- ✅ Comprehensive test suite verifies BPHS compliance
-
-**BPHS Verses Implemented**: 4.1-4.3, 4.5-4.8, 4.10-4.11, 4.12-4.16, 4.18-4.28
-
-**Source Files**:
+This implementation follows strict BPHS-only compliance (verses 4.1–4.3, 4.5–4.8, 4.10–4.11, 4.12–4.16, 4.18–4.28) with explicit verse references in `backend/btr_core.py`. Supporting docs:
 - Verse translations: `docs/BPHS-BTR-Exact-Verses.md`
 - Implementation plan: `docs/BTR-Pipeline-Implementation-Plan.md`
 - Workflow: `docs/BTR-ASCII-Workflow.md`

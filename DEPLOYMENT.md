@@ -4,6 +4,7 @@
 - Python 3.10+ (matches `runtime.txt`)
 - Node.js 18+ (for building the React frontend)
 - OpenCage API key for geocoding
+- **Build artefact required**: `frontend-react/dist` must exist before the backend process starts (the FastAPI app raises if the build is missing).
 
 ## Environment Variables
 - `OPENCAGE_API_KEY` (required) – OpenCage Geocoding key.
