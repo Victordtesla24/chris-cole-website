@@ -61,3 +61,42 @@
 #### Conclusion:
 The UI/UX and backend API mapping is **100% correct and complete**. All field names, types, and data structures match between frontend and backend. The data flow from UI components to backend API is properly implemented and aligned with the BTR-ASCII-Workflow.md specification.
 
+## Latest Update: Fix ModuleNotFoundError - fastapi
+
+### Date: Current Session
+
+### Task: Fix uvicorn startup error - ModuleNotFoundError: No module named 'fastapi'
+
+#### Status: ✅ COMPLETED
+
+#### Symptom:
+- Error: `ModuleNotFoundError: No module named 'fastapi'`
+- Occurs when running `uvicorn backend.main:app` directly from command line
+- System uvicorn (installed via Homebrew) uses system Python which doesn't have project dependencies
+
+#### Root Cause:
+- User installed uvicorn via Homebrew, which installed it system-wide
+- System Python doesn't have fastapi and other project dependencies
+- Project has virtual environment with all dependencies installed
+- Need to use venv's uvicorn instead of system uvicorn
+
+#### Fix Applied:
+1. Use virtual environment's uvicorn: `source venv/bin/activate && uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`
+2. Or use provided `run.sh` script which activates venv automatically
+3. Or use venv's uvicorn directly: `./venv/bin/uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`
+
+#### Verification Results:
+- ✅ Venv has fastapi installed: `fastapi 0.121.2`
+- ✅ Venv has uvicorn installed: `uvicorn 0.38.0`
+- ✅ Server starts successfully when using venv's uvicorn
+- ✅ All dependencies available in venv
+
+#### Files Modified:
+- `.cursor/memory-bank/currentTaskContext.md` (documented fix)
+- `.cursor/memory-bank/progressTracking.md` (this file)
+
+#### Notes:
+- Always use virtual environment for running the server
+- `run.sh` script provides consistent way to start server
+- System uvicorn should not be used - use venv's uvicorn instead
+

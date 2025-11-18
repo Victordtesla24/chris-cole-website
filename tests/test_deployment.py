@@ -10,11 +10,10 @@ It checks:
 - Application can start (without actually running it)
 """
 
-import os
 import sys
 from pathlib import Path
 
-def test_file_exists(filepath: str, description: str) -> bool:
+def _file_exists(filepath: str, description: str) -> bool:
     """Test if a file exists."""
     path = Path(filepath)
     exists = path.exists()
@@ -24,7 +23,7 @@ def test_file_exists(filepath: str, description: str) -> bool:
         print(f"❌ {description}: {filepath} - NOT FOUND")
     return exists
 
-def test_file_content(filepath: str, required_content: str, description: str) -> bool:
+def _file_content(filepath: str, required_content: str, description: str) -> bool:
     """Test if file contains required content."""
     path = Path(filepath)
     if not path.exists():
@@ -39,7 +38,7 @@ def test_file_content(filepath: str, required_content: str, description: str) ->
         print(f"❌ {description}: '{required_content}' NOT found in {filepath}")
         return False
 
-def test_python_version() -> bool:
+def _python_version() -> bool:
     """Test Python version matches runtime.txt."""
     runtime_path = Path("runtime.txt")
     if not runtime_path.exists():
@@ -64,7 +63,7 @@ def test_python_version() -> bool:
         print("   Note: This is a warning, not an error. Platform will use runtime.txt version.")
         return True  # Not a hard failure
 
-def test_procfile() -> bool:
+def _procfile() -> bool:
     """Test Procfile configuration."""
     procfile_path = Path("Procfile")
     if not procfile_path.exists():
@@ -91,7 +90,7 @@ def test_procfile() -> bool:
     
     return port_ok and uvicorn_ok
 
-def test_requirements() -> bool:
+def _requirements() -> bool:
     """Test requirements.txt exists and has key dependencies."""
     req_path = Path("requirements.txt")
     if not req_path.exists():
@@ -117,7 +116,7 @@ def test_requirements() -> bool:
     
     return all_present
 
-def test_env_vars_documented() -> bool:
+def _env_vars_documented() -> bool:
     """Test that environment variables are documented in DEPLOYMENT.md."""
     deploy_path = Path("DEPLOYMENT.md")
     if not deploy_path.exists():
@@ -137,7 +136,7 @@ def test_env_vars_documented() -> bool:
     
     return all_documented
 
-def test_backend_structure() -> bool:
+def _backend_structure() -> bool:
     """Test backend directory structure."""
     required_files = [
         "backend/__init__.py",
@@ -156,7 +155,7 @@ def test_backend_structure() -> bool:
     
     return all_exist
 
-def test_frontend_structure() -> bool:
+def _frontend_structure() -> bool:
     """Test frontend directory structure."""
     required_files = [
         "frontend/index.html",
@@ -173,6 +172,23 @@ def test_frontend_structure() -> bool:
     
     return True  # Frontend is optional for API deployment
 
+def test_deployment_artifacts_exist():
+    """Validate deployment-critical files exist."""
+    assert _file_exists("Procfile", "Procfile")
+    assert _file_exists("runtime.txt", "runtime.txt")
+    assert _file_exists("requirements.txt", "requirements.txt")
+    # DEPLOYMENT.md is optional but still checked for visibility
+    assert _file_exists("DEPLOYMENT.md", "DEPLOYMENT.md")
+
+def test_deployment_configs_valid():
+    """Validate Procfile, Python version, requirements, and structure."""
+    assert _procfile()
+    assert _python_version()
+    assert _requirements()
+    assert _env_vars_documented()
+    assert _backend_structure()
+    assert _frontend_structure()
+
 def main():
     """Run all deployment tests."""
     print("=" * 60)
@@ -184,40 +200,40 @@ def main():
     
     print("1. Checking required files...")
     print("-" * 60)
-    results.append(test_file_exists("Procfile", "Procfile"))
-    results.append(test_file_exists("runtime.txt", "runtime.txt"))
-    results.append(test_file_exists("requirements.txt", "requirements.txt"))
-    results.append(test_file_exists("DEPLOYMENT.md", "DEPLOYMENT.md"))
+    results.append(_file_exists("Procfile", "Procfile"))
+    results.append(_file_exists("runtime.txt", "runtime.txt"))
+    results.append(_file_exists("requirements.txt", "requirements.txt"))
+    results.append(_file_exists("DEPLOYMENT.md", "DEPLOYMENT.md"))
     print()
     
     print("2. Checking Procfile configuration...")
     print("-" * 60)
-    results.append(test_procfile())
+    results.append(_procfile())
     print()
     
     print("3. Checking Python version...")
     print("-" * 60)
-    results.append(test_python_version())
+    results.append(_python_version())
     print()
     
     print("4. Checking requirements.txt...")
     print("-" * 60)
-    results.append(test_requirements())
+    results.append(_requirements())
     print()
     
     print("5. Checking environment variable documentation...")
     print("-" * 60)
-    results.append(test_env_vars_documented())
+    results.append(_env_vars_documented())
     print()
     
     print("6. Checking backend structure...")
     print("-" * 60)
-    results.append(test_backend_structure())
+    results.append(_backend_structure())
     print()
     
     print("7. Checking frontend structure...")
     print("-" * 60)
-    results.append(test_frontend_structure())
+    results.append(_frontend_structure())
     print()
     
     print("=" * 60)
@@ -240,4 +256,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

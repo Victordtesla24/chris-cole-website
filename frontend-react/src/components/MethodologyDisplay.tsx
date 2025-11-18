@@ -3,122 +3,112 @@ import './MethodologyDisplay.css';
 export function MethodologyDisplay() {
   return (
     <div className="methodology-display">
-      <h2>BPHS Birth Time Rectification Methodology</h2>
+      <h2>How Your Birth Time Is Verified (BPHS Adhyāya 4)</h2>
       <div className="methodology-content">
         <div className="methodology-section">
           <h3>Source</h3>
           <p>
-            <strong>Brihat Parashara Hora Shastra (बृहत्पाराशरहोराशास्त्र)</strong> - Chapter 4: लग्नाध्याय (Lagna Adhyaya)
+            <strong>Brihat Parashara Hora Shastra (बृहत्पाराशरहोराशास्त्र)</strong> — Chapter 4: लग्नाध्याय (Lagna Adhyaya)
           </p>
           <p className="note">
-            All rectification methods are based strictly on the verses from this chapter. 
-            No other texts, commentaries, or invented rules are used.
+            Every checkpoint comes straight from this chapter. Verse cues let you open <em>docs/पराशरहोराशास्त्र Brihat Parashar Hora Shastra _djvu.txt</em> and read the Sanskrit yourself.
           </p>
         </div>
 
         <div className="methodology-section">
-          <h3>Core Methods Implemented</h3>
+          <h3>What happens (plain language with verses)</h3>
           <div className="verse-list">
             <div className="verse-item">
-              <h4>1. Gulika Calculation (BPHS 4.1-4.3)</h4>
-              <p className="sanskrit">रविवारादिशन्यन्तं गुलिकादि निरूप्यते। दिवसानष्टधा कृत्वा वारेशाद्मणयेत््रमात्।</p>
+              <h4>1) Mark Gulika (Adhyāya 4, Verses 1-3)</h4>
+              <p className="sanskrit">दिवसानष्टधा कृत्वा वारेशाद्मणयेत््रमात्...</p>
               <p>
-                Divide day/night duration into 8 equal parts (khandas). Count from weekday lord. 
-                Saturn's khanda = Gulika period. Gulika Lagna is used for verification.
+                Parāśara says: split the day/night into 8 parts; Saturn’s part is Gulika. We place that exact point to use as a purifier.
               </p>
             </div>
 
             <div className="verse-item">
-              <h4>2. Pranapada Calculation (BPHS 4.5, 4.7)</h4>
-              <p className="sanskrit">घटी चतुर्गुणा कार्यां तिथ्याप्तैश्च पलैर्युताः। दिनकरेणापहतं शेषं प्राणपदं स्मृतम्।</p>
+              <h4>2) Build Prāṇapada two ways (Verses 5 &amp; 7)</h4>
+              <p className="sanskrit">घटी चतुर्गुणा कार्यां तिथ्याप्तैश्च पलैर्युताः...</p>
               <p>
-                <strong>Method A (Madhya - Rough):</strong> Multiply ghatis × 4, add palas ÷ 15, divide by 12.
-                <br />
-                <strong>Method B (Sphuta - Accurate):</strong> Convert to palas, divide by 15, add to Sun based on 
-                Sun's rashi nature (Chara/Sthira/Dvisvabhava). This is the primary method used.
+                Verse 5 (madhya) uses ghāṭīs/palās; Verse 7 (sphuṭa) uses full palās tied to the Sun’s sign nature. Your lagna must satisfy both.
               </p>
             </div>
 
             <div className="verse-item">
-              <h4>3. Trine Rule - MANDATORY (BPHS 4.10) ⭐</h4>
-              <p className="sanskrit">प्राणपदं को राशि से त्रिकोण राशि मे मनुष्यों के जन्मलग्न की राशि होती है।</p>
+              <h4>3) Human-only band (Verse 10)</h4>
+              <p className="sanskrit">प्राणपदं को राशि से त्रिकोण राशि मे...</p>
               <p>
-                <strong>CRITICAL:</strong> Birth lagna must be in trine position (1st, 5th, or 9th) from Pranapada's rashi. 
-                If this fails, the candidate is rejected as non-human birth per BPHS.
+                Only 1st/5th/9th from Prāṇapada counts for humans. Others are animal/bird/other per the verse, so we drop them.
               </p>
             </div>
 
             <div className="verse-item">
-              <h4>4. Degree Matching (BPHS 4.6)</h4>
+              <h4>4) Degree equality (Verse 6)</h4>
               <p className="sanskrit">लग्नांशप्राणांशपदैक्यता स्यात्</p>
               <p>
-                Lagna degrees and Pranapada degrees should be equal (पदैक्यता). 
-                Tolerance: ±2° for acceptable match.
+                Lagna and Prāṇapada must be equal at palā precision. We surface the exact gap in degrees for transparency.
               </p>
             </div>
 
             <div className="verse-item">
-              <h4>5. Triple Verification (BPHS 4.8)</h4>
+              <h4>5) Purification fallback (Verse 8)</h4>
               <p className="sanskrit">विना प्राणपदाच्छुद्धो गुलिकाद्वा निशाकराद्</p>
               <p>
-                Birth lagna must be verified by at least one of: Pranapada, Gulika, or Moon. 
-                If none align, the lagna is considered impure (Ashuddha).
+                Order matters: first Prāṇapada; if not, Moon; if still not, Gulika/its 7th. We follow that sequence and show which anchor passed.
               </p>
             </div>
 
             <div className="verse-item">
-              <h4>6. Special Lagnas (BPHS 4.18-28)</h4>
+              <h4>6) Supporting lagnas (Verses 18-28)</h4>
               <ul>
-                <li><strong>Bhava Lagna (4.18):</strong> Every 5 ghatis = 1 sign progression</li>
-                <li><strong>Hora Lagna (4.20-21):</strong> Every 2.5 ghatis = 1 sign progression</li>
-                <li><strong>Ghati Lagna (4.22-24):</strong> 1 ghati = 1 sign, 1 pala = 2 degrees</li>
-                <li><strong>Varnada Lagna (4.26-28):</strong> Calculated from Janma + Hora lagnas</li>
+                <li><strong>Bhava:</strong> every 5 ghāṭīs = 1 sign (V.18)</li>
+                <li><strong>Hora:</strong> every 2.5 ghāṭīs = 1 sign (V.20-21)</li>
+                <li><strong>Ghati:</strong> 1 ghāṭī = 1 sign, 1 palā = 2° (V.22-24)</li>
+                <li><strong>Varnada:</strong> built from Janma + Hora lagnas (V.26-28)</li>
               </ul>
             </div>
 
             <div className="verse-item">
-              <h4>7. Nisheka Lagna (BPHS 4.12-16)</h4>
-              <p className="sanskrit">यस्मिन् भावे स्थितो कोणस्तस्य मान्देर्यदन्तरम्। लग्नभाग्यन्तरं योज्यं यच्च राश्यादि जायते।</p>
+              <h4>7) Conception link (Verses 12-16)</h4>
+              <p className="sanskrit">यस्मिन् भावे स्थितो कोणस्तस्य मान्देर्यदन्तरम्...</p>
               <p>
-                Calculates conception time and verifies gestation period. Should be approximately 9 lunar months 
-                (5-10.5 months) for realistic human birth.
+                Shows the conception lagna and gestation window (about 9 lunar months) per the same verses.
               </p>
             </div>
           </div>
         </div>
 
         <div className="methodology-section">
-          <h3>Rectification Pipeline</h3>
+          <h3>Checkpoints you will see</h3>
           <ol className="pipeline-steps">
-            <li><strong>Phase 1:</strong> Calculate sunrise/sunset and generate candidate times</li>
-            <li><strong>Phase 2:</strong> Calculate Gulika Lagna (BPHS 4.1-4.3)</li>
-            <li><strong>Phase 3:</strong> Calculate Pranapada - both Madhya and Sphuta (BPHS 4.5, 4.7)</li>
-            <li><strong>Phase 4:</strong> Apply hard filters:
+            <li><strong>Checkpoint 1:</strong> Convert your clock time to ghāṭī/palā from local sunrise (V.1-3)</li>
+            <li><strong>Checkpoint 2:</strong> Place Gulika from weekday + day/night split (V.1-3)</li>
+            <li><strong>Checkpoint 3:</strong> Build Prāṇapada (madhya &amp; sphuṭa) (V.5 &amp; 7)</li>
+            <li><strong>Checkpoint 4:</strong> Apply BPHS gates:
               <ul>
-                <li>Trine Rule (BPHS 4.10) - MANDATORY</li>
-                <li>Degree Matching (BPHS 4.6)</li>
-                <li>Triple Verification (BPHS 4.8)</li>
+                <li>Human-only trine (V.10)</li>
+                <li>Degree equality (V.6)</li>
+                <li>Purify via Prāṇapada → Moon → Gulika (V.8)</li>
               </ul>
             </li>
-            <li><strong>Phase 5:</strong> Calculate Special Lagnas (BPHS 4.18-28)</li>
-            <li><strong>Phase 6:</strong> Calculate Nisheka Lagna (BPHS 4.12-16)</li>
-            <li><strong>Phase 7:</strong> Optional: Score physical traits and life events</li>
-            <li><strong>Phase 8:</strong> Rank candidates by composite score</li>
+            <li><strong>Checkpoint 5:</strong> Show Bhava/Hora/Ghati/Varnada lagnas (V.18-28)</li>
+            <li><strong>Checkpoint 6:</strong> Show Nisheka (conception) lagna (V.12-16)</li>
+            <li><strong>Checkpoint 7:</strong> Optional trait/event notes (do not change BPHS pass/fail)</li>
+            <li><strong>Checkpoint 8:</strong> Rank by BPHS-first score; heuristics only displayed</li>
           </ol>
         </div>
 
         <div className="methodology-section">
           <h3>Important Notes</h3>
           <ul className="notes-list">
-            <li>All calculations use <strong>sidereal zodiac</strong> with <strong>Lahiri ayanamsa</strong></li>
-            <li>High-precision Swiss Ephemeris (JPL-based) is used for astronomical calculations</li>
-            <li>Only BPHS verses from Chapter 4 are implemented - no other texts or commentaries</li>
-            <li>The Trine Rule (BPHS 4.10) is <strong>mandatory</strong> - candidates failing this are rejected</li>
-            <li>Sphuta Pranapada (BPHS 4.7) is the primary rectification method used</li>
+            <li>Sidereal zodiac with Lahiri ayanamsa</li>
+            <li>Swiss Ephemeris plugs your data into the verse formulas</li>
+            <li>Only BPHS Chapter 4 verses are applied — no added rules/commentaries</li>
+            <li>Trine rule (V.10) and degree equality (V.6) are mandatory for human birth</li>
+            <li>Verse references point back to the Sanskrit file so you can verify</li>
           </ul>
         </div>
       </div>
     </div>
   );
 }
-

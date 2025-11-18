@@ -265,6 +265,20 @@ fieldset small {
   gap: 15px;
 }
 
+.height-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.verse-note {
+  display: block;
+  margin-top: 4px;
+  color: #4a5568;
+  font-size: 12px;
+}
+
 .children-dates {
   margin-top: 10px;
   padding-left: 20px;
@@ -310,6 +324,33 @@ fieldset small {
 
 .btn-secondary:hover {
   background: #e0e0e0;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.list-row-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  flex: 1;
+}
+
+.inline-remove {
+  background: #ffebee;
+  border: 1px solid #ef9a9a;
+  color: #c62828;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.inline-remove:hover {
+  background: #ffcdd2;
 }
 
 .review-section {
@@ -365,4 +406,3 @@ fieldset small {
     width: 100%;
   }
 }
-

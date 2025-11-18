@@ -44,6 +44,27 @@ export function CandidateCard({ candidate, index, isBest = false }: CandidateCar
             {candidate.delta_pp_deg.toFixed(2)}°
           </span>
         </div>
+        {candidate.bphs_score !== null && candidate.bphs_score !== undefined && (
+          <div className="detail-row">
+            <span className="label">BPHS-Only Score:</span>
+            <span className="value">{candidate.bphs_score.toFixed(2)}</span>
+          </div>
+        )}
+        {candidate.purification_anchor && (
+          <div className="detail-row">
+            <span className="label">Purification Anchor (BPHS 4.8):</span>
+            <span className="value">{candidate.purification_anchor}</span>
+          </div>
+        )}
+        {candidate.shodhana_delta_palas !== null && candidate.shodhana_delta_palas !== undefined && (
+          <div className="detail-row">
+            <span className="label">Shodhana Adjustment:</span>
+            <span className="value">
+              {candidate.shodhana_delta_palas > 0 ? '+' : ''}
+              {candidate.shodhana_delta_palas} palas
+            </span>
+          </div>
+        )}
         <div className="detail-row">
           <span className="label">Passes Trine Rule (BPHS 4.10):</span>
           <span className={`value ${candidate.passes_trine_rule ? 'pass' : 'fail'}`}>
@@ -227,4 +248,3 @@ export function CandidateCard({ candidate, index, isBest = false }: CandidateCar
 }
 
 export default CandidateCard;
-

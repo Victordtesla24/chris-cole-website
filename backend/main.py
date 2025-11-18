@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 import httpx
 
 from . import config
@@ -63,49 +63,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files - prefer React build, fallback to plain HTML frontend
+# Mount static files - require React production build
 react_build_path = Path(__file__).parent.parent / "frontend-react" / "dist"
-frontend_path = Path(__file__).parent.parent / "frontend"
+react_index_path = react_build_path / "index.html"
+if not react_index_path.exists():
+    raise RuntimeError(
+        f"React production build is missing at '{react_index_path}'. "
+        "Build the frontend with `npm install && npm run build` inside frontend-react/"
+    )
 
-# Serve React build if it exists, otherwise serve plain HTML frontend
-if react_build_path.exists():
-    # Serve React build (production)
-    app.mount("/assets", StaticFiles(directory=str(react_build_path / "assets")), name="assets")
-elif frontend_path.exists():
-    # Fallback to plain HTML frontend
-    app.mount("/static", StaticFiles(directory=str(frontend_path)), name="static")
-    
-    @app.get("/styles.css")
-    async def get_styles():
-        """Serve the CSS file"""
-        css_path = frontend_path / "styles.css"
-        if css_path.exists():
-            return FileResponse(str(css_path), media_type="text/css")
-        raise HTTPException(status_code=404, detail="CSS file not found")
-    
-    @app.get("/app.js")
-    async def get_app_js():
-        """Serve the JavaScript file"""
-        js_path = frontend_path / "app.js"
-        if js_path.exists():
-            return FileResponse(str(js_path), media_type="application/javascript")
-        raise HTTPException(status_code=404, detail="JavaScript file not found")
+app.mount("/assets", StaticFiles(directory=str(react_build_path / "assets")), name="assets")
 
 @app.get("/")
 async def read_root():
-    """Serve the frontend index.html (React build preferred, fallback to plain HTML)"""
-    if react_build_path.exists():
-        index_path = react_build_path / "index.html"
-        if index_path.exists():
-            return FileResponse(str(index_path))
-        return {"message": "React frontend not found. API available at /docs"}
-    elif frontend_path.exists():
-        index_path = frontend_path / "index.html"
-        if index_path.exists():
-            return FileResponse(str(index_path))
-        return {"message": "Frontend not found. API available at /docs"}
-    else:
-        return {"message": "Frontend not found. API available at /docs"}
+    """Serve the React production frontend."""
+    if not react_index_path.exists():
+        raise HTTPException(status_code=500, detail="React frontend not found. Build assets before deployment.")
+    return FileResponse(str(react_index_path))
 
 # ---------------------------------------------------------------------------
 # Pydantic models for request/response
@@ -127,14 +101,56 @@ class TimeRangeOverride(BaseModel):
     start: str = Field(..., description="Start time (HH:MM)")
     end: str = Field(..., description="End time (HH:MM)")
 
+class PhysicalTraitsModel(BaseModel):
+    height: Optional[str] = None  # Legacy band
+    height_cm: Optional[float] = Field(None, ge=0)
+    height_feet: Optional[float] = Field(None, ge=0)
+    height_inches: Optional[float] = Field(None, ge=0)
+    height_band: Optional[str] = None
+    build: Optional[str] = None
+    build_band: Optional[str] = None
+    body_frame: Optional[str] = None
+    complexion: Optional[str] = None
+    complexion_tone: Optional[str] = None
+    notes: Optional[str] = None
+
+class MarriageEventModel(BaseModel):
+    date: str
+    place: Optional[str] = None
+    spouse_name: Optional[str] = None
+    notes: Optional[str] = None
+
+class ChildEventModel(BaseModel):
+    date: str
+    gender: Optional[str] = None
+    notes: Optional[str] = None
+
+class CareerEventModel(BaseModel):
+    date: str
+    role: Optional[str] = None
+    description: Optional[str] = None
+
+class MajorEventModel(BaseModel):
+    date: str
+    title: str
+    description: Optional[str] = None
+
+class LifeEventsModel(BaseModel):
+    marriage: Optional[MarriageEventModel] = None  # Legacy single marriage
+    marriages: Optional[List[MarriageEventModel]] = None
+    children: Optional[Any] = None  # Accept legacy dict or list of child events
+    career: Optional[Any] = None    # Accept list of career events or date strings
+    major: Optional[List[MajorEventModel]] = None
+    model_config = ConfigDict(extra='allow')
+
 class BTRRequest(BaseModel):
     dob: str = Field(..., description="Date of birth in YYYY-MM-DD")
     pob_text: str = Field(..., description="Place of birth text")
     tz_offset_hours: float = Field(..., description="Time zone offset from UTC in hours")
     approx_tob: ApproxTob = Field(..., description="Approximate time of birth details")
     time_range_override: Optional[TimeRangeOverride] = Field(None, description="Explicit time range override")
-    optional_traits: Optional[Dict[str, Any]] = None
-    optional_events: Optional[Dict[str, Any]] = None
+    optional_traits: Optional[PhysicalTraitsModel] = None
+    optional_events: Optional[LifeEventsModel] = None
 
 class SpecialLagnas(BaseModel):
     bhava_lagna: float
@@ -158,6 +174,7 @@ class LifeEventsScore(BaseModel):
     marriage: Optional[float] = None
     children: Optional[float] = None
     career: Optional[float] = None
+    major: Optional[float] = None
     overall: Optional[float] = None
 
 class BTRCandidate(BaseModel):
@@ -166,12 +183,24 @@ class BTRCandidate(BaseModel):
     pranapada_deg: float
     delta_pp_deg: float
     passes_trine_rule: bool
+    purification_anchor: Optional[str] = None
+    bphs_score: Optional[float] = None
     verification_scores: Dict[str, float]
     special_lagnas: Optional[SpecialLagnas] = None
     nisheka: Optional[Nisheka] = None
     composite_score: Optional[float] = None
+    shodhana_delta_palas: Optional[int] = None
     physical_traits_scores: Optional[PhysicalTraitsScore] = None
     life_events_scores: Optional[LifeEventsScore] = None
+
+class RejectedCandidate(BaseModel):
+    time_local: str
+    lagna_deg: float
+    pranapada_deg: float
+    passes_trine_rule: bool
+    passes_purification: bool
+    non_human_classification: Optional[str] = None
+    rejection_reason: Optional[str] = None
 
 class BTRResponse(BaseModel):
     engine_version: str
@@ -179,11 +208,51 @@ class BTRResponse(BaseModel):
     search_config: Dict[str, Any]
     candidates: List[BTRCandidate]
     best_candidate: Optional[BTRCandidate]
+    rejections: Optional[List[RejectedCandidate]] = None
     notes: Optional[str] = None
 
 # ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
+
+def _normalize_traits_for_scoring(traits: Optional[PhysicalTraitsModel]) -> Optional[Dict[str, Any]]:
+    """Map rich trait input into the bands expected by the scorer."""
+    if traits is None:
+        return None
+
+    data = traits.model_dump(exclude_none=True)
+    height_band = str(data.get('height_band') or data.get('height') or '').upper() or None
+    build_band = str(data.get('build_band') or data.get('build') or '').upper() or None
+    complexion_band = str(data.get('complexion_tone') or data.get('complexion') or '').upper() or None
+
+    if not height_band and 'height_cm' in data:
+        try:
+            val = float(data['height_cm'])
+            if val >= 175:
+                height_band = 'TALL'
+            elif val <= 160:
+                height_band = 'SHORT'
+            else:
+                height_band = 'MEDIUM'
+        except (TypeError, ValueError):
+            height_band = None
+
+    normalized = {
+        **({} if height_band is None else {'height': height_band, 'height_band': height_band}),
+        **({} if build_band is None else {'build': build_band, 'build_band': build_band}),
+        **({} if complexion_band is None else {'complexion': complexion_band, 'complexion_tone': complexion_band}),
+    }
+    for key in ('height_cm', 'height_feet', 'height_inches', 'body_frame', 'notes'):
+        if key in data:
+            normalized[key] = data[key]
+    return normalized or None
+
+def _normalize_events_for_scoring(events: Optional[LifeEventsModel]) -> Optional[Dict[str, Any]]:
+    """Preserve structured life events while keeping legacy keys for scoring."""
+    if events is None:
+        return None
+    data = events.model_dump(exclude_none=True)
+    return data or None
 
 async def opencage_geocode(place: str) -> Dict[str, Any]:
     """Resolve a place name using the OpenCage API.
@@ -192,7 +261,7 @@ async def opencage_geocode(place: str) -> Dict[str, Any]:
         place: Free‑text place description.
 
     Returns:
-        Dict with keys 'lat', 'lon', 'formatted'.
+        Dict with keys 'lat', 'lon', 'formatted', and optional timezone info.
     """
     api_key = config.OPENCAGE_API_KEY
     if not api_key:
@@ -225,10 +294,23 @@ async def opencage_geocode(place: str) -> Dict[str, Any]:
             formatted = str(result.get('formatted', ''))
             if not formatted:
                 formatted = f"{lat}, {lon}"
+            tz_data = result.get('annotations', {}).get('timezone', {}) or {}
+            tz_offset_hours = None
+            try:
+                tz_offset_hours = round(float(tz_data.get('offset_sec', 0)) / 3600.0, 2)
+            except (TypeError, ValueError):
+                tz_offset_hours = None
+            tz_name = tz_data.get('name')
         except (KeyError, ValueError, TypeError) as e:
             raise HTTPException(status_code=502, detail=f"Invalid response format from OpenCage API: {str(e)}")
         
-        return {'lat': lat, 'lon': lon, 'formatted': formatted}
+        return {
+            'lat': lat,
+            'lon': lon,
+            'formatted': formatted,
+            'tz_offset_hours': tz_offset_hours,
+            'timezone_name': tz_name
+        }
 
 # ---------------------------------------------------------------------------
 # API endpoints
@@ -297,10 +379,13 @@ async def btr(request: BTRRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error in Gulika calculation: {str(e)}")
 
-    # Search candidate times at a default resolution (10 minutes)
-    step_minutes = 10
+    traits_for_scoring = _normalize_traits_for_scoring(request.optional_traits)
+    events_for_scoring = _normalize_events_for_scoring(request.optional_events)
+
+    # Search candidate times at BPHS-aligned resolution (2 minutes)
+    step_minutes = 2
     try:
-        candidates = btr_core.search_candidate_times(
+        candidates, rejections = btr_core.search_candidate_times(
             dob=dob_date,
             latitude=latitude,
             longitude=longitude,
@@ -308,11 +393,15 @@ async def btr(request: BTRRequest):
             start_time_str=start_time,
             end_time_str=end_time,
             step_minutes=step_minutes,
+            strict_bphs=True,
+            enable_shodhana=True,
+            bphs_only_ordering=True,
+            collect_rejections=True,
             sunrise_local=sunrise_local,
             sunset_local=sunset_local,
             gulika_info=gulika_info,
-            optional_traits=request.optional_traits,
-            optional_events=request.optional_events
+            optional_traits=traits_for_scoring,
+            optional_events=events_for_scoring
         )
     except RuntimeError as e:
         raise HTTPException(status_code=500, detail=f"Failed to search candidate times: {str(e)}")
@@ -338,6 +427,9 @@ async def btr(request: BTRRequest):
                 'pranapada_deg': c['pranapada_deg'],
                 'delta_pp_deg': c['delta_pp_deg'],
                 'passes_trine_rule': c['passes_trine_rule'],
+                'purification_anchor': c.get('purification_anchor'),
+                'bphs_score': c.get('bphs_score'),
+                'shodhana_delta_palas': c.get('shodhana_delta_palas'),
                 'verification_scores': c['verification_scores']
             }
             if 'special_lagnas' in c:
@@ -355,6 +447,16 @@ async def btr(request: BTRRequest):
             raise HTTPException(
                 status_code=500,
                 detail=f"Invalid candidate data structure: {str(e)}"
+            )
+    
+    rejection_models: List[RejectedCandidate] = []
+    for r in rejections:
+        try:
+            rejection_models.append(RejectedCandidate(**r))
+        except (KeyError, ValueError, TypeError) as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid rejection data structure: {str(e)}"
             )
     
     best_candidate = candidate_models[0] if candidate_models else None
@@ -389,6 +491,7 @@ async def btr(request: BTRRequest):
         },
         candidates=candidate_models,
         best_candidate=best_candidate,
+        rejections=rejection_models or None,
         notes=methodology_notes
     )
     return response

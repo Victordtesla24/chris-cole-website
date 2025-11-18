@@ -12,25 +12,58 @@ export interface TimeRangeOverride {
 }
 
 export interface PhysicalTraits {
-  height?: string;
-  build?: string;
-  complexion?: string;
+  height?: string; // Legacy band (SHORT/MEDIUM/TALL)
+  height_cm?: number;
+  height_feet?: number;
+  height_inches?: number;
+  height_band?: 'SHORT' | 'MEDIUM' | 'TALL';
+  build?: string; // Legacy band
+  build_band?: 'SLIM' | 'MEDIUM' | 'ATHLETIC' | 'HEAVY';
+  body_frame?: string;
+  complexion?: string; // Legacy band
+  complexion_tone?: 'FAIR' | 'WHEATISH' | 'DARK';
+  notes?: string;
 }
 
 export interface MarriageEvent {
   date: string;
   spouse_name?: string;
+  place?: string;
+  notes?: string;
 }
 
-export interface ChildrenEvent {
-  count: number;
-  dates: string[];
+export interface ChildEvent {
+  date: string;
+  gender?: string;
+  notes?: string;
+}
+
+export interface CareerEvent {
+  date: string;
+  role?: string;
+  description?: string;
+}
+
+export interface MajorEvent {
+  date: string;
+  title: string;
+  description?: string;
+}
+
+export interface Geocode {
+  lat: number;
+  lon: number;
+  formatted: string;
+  tz_offset_hours?: number | null;
+  timezone_name?: string | null;
 }
 
 export interface LifeEvents {
-  marriage?: MarriageEvent;
-  children?: ChildrenEvent;
-  career?: string[];
+  marriage?: MarriageEvent; // Legacy single marriage
+  marriages?: MarriageEvent[];
+  children?: ChildEvent[];
+  career?: CareerEvent[];
+  major?: MajorEvent[];
 }
 
 export interface BTRRequest {
@@ -68,6 +101,7 @@ export interface LifeEventsScore {
   marriage?: number | null;
   children?: number | null;
   career?: number | null;
+  major?: number | null;
   overall?: number | null;
 }
 
@@ -84,12 +118,25 @@ export interface BTRCandidate {
   pranapada_deg: number;
   delta_pp_deg: number;
   passes_trine_rule: boolean;
+   purification_anchor?: string | null;
+   bphs_score?: number | null;
+   shodhana_delta_palas?: number | null;
   verification_scores: VerificationScores;
   special_lagnas?: SpecialLagnas | null;
   nisheka?: Nisheka | null;
   composite_score?: number | null;
   physical_traits_scores?: PhysicalTraitsScore | null;
   life_events_scores?: LifeEventsScore | null;
+}
+
+export interface RejectedCandidate {
+  time_local: string;
+  lagna_deg: number;
+  pranapada_deg: number;
+  passes_trine_rule: boolean;
+  passes_purification: boolean;
+  non_human_classification?: string | null;
+  rejection_reason?: string | null;
 }
 
 export interface SearchConfig {
@@ -112,6 +159,6 @@ export interface BTRResponse {
   search_config: SearchConfig;
   candidates: BTRCandidate[];
   best_candidate: BTRCandidate | null;
+  rejections?: RejectedCandidate[] | null;
   notes?: string | null;
 }
-

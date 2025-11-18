@@ -56,9 +56,20 @@ export function BTRForm({ onSubmit }: BTRFormProps) {
     } : null;
 
     const optionalEvents: LifeEvents | null = (marriageDate || childrenCount > 0 || careerEvents) ? {
-      ...(marriageDate && { marriage: { date: marriageDate } }),
-      ...(childrenCount > 0 && { children: { count: childrenCount, dates: childrenDates } }),
-      ...(careerEvents && { career: careerEvents.split(',').map(d => d.trim()).filter(d => d) }),
+      ...(marriageDate && { marriages: [{ date: marriageDate }], marriage: { date: marriageDate } }),
+      ...(childrenCount > 0 && {
+        children: childrenDates
+          .slice(0, childrenCount)
+          .filter(Boolean)
+          .map((d) => ({ date: d }))
+      }),
+      ...(careerEvents && {
+        career: careerEvents
+          .split(',')
+          .map(d => d.trim())
+          .filter(d => d)
+          .map(date => ({ date }))
+      }),
     } : null;
 
     // Ensure tzOffset is a valid number
@@ -311,4 +322,3 @@ export function BTRForm({ onSubmit }: BTRFormProps) {
     </form>
   );
 }
-

@@ -244,6 +244,54 @@
 
 **Conclusion**: The UI/UX and backend API mapping is **100% correct and complete**. All field names, types, and data structures match between frontend and backend. The data flow from UI components to backend API is properly implemented and aligned with the BTR-ASCII-Workflow.md specification.
 
+## Error Fix: ModuleNotFoundError - fastapi
+
+### Status: ✅ FIXED
+
+**Symptom**: 
+```
+ModuleNotFoundError: No module named 'fastapi'
+```
+When running `uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000` directly from command line.
+
+**Root Cause**:
+- User installed uvicorn via Homebrew (`brew install uvicorn`)
+- Homebrew installed uvicorn system-wide, using system Python
+- System Python doesn't have project dependencies (fastapi, etc.) installed
+- Project has virtual environment (`venv/`) with all dependencies installed
+- Running uvicorn directly uses system Python instead of venv Python
+
+**Impacted Modules**:
+- `backend/main.py` - Cannot import fastapi
+- Server startup fails
+
+**Evidence**:
+- Error trace shows: `File "/Users/Shared/cursor/btr-demo/backend/main.py", line 22, in <module> from fastapi import FastAPI, HTTPException, Query ModuleNotFoundError: No module named 'fastapi'`
+- System uvicorn path: `/opt/homebrew/Cellar/uvicorn/0.38.0/`
+- Venv uvicorn path: `/Users/Shared/cursor/btr-demo/venv/bin/uvicorn`
+- Venv has fastapi installed: `fastapi 0.121.2`
+
+**Fix Summary**:
+1. Use virtual environment's uvicorn instead of system uvicorn
+2. Activate venv before running: `source venv/bin/activate && uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`
+3. Or use the provided `run.sh` script which activates venv automatically
+4. Or use venv's uvicorn directly: `./venv/bin/uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000`
+
+**Files Touched**:
+- `.cursor/memory-bank/currentTaskContext.md` (this file - documenting fix)
+- `.cursor/memory-bank/progressTracking.md` (updated)
+
+**Why This Works**:
+- Virtual environment has all project dependencies installed (fastapi, uvicorn, httpx, pydantic, etc.)
+- Using venv's Python ensures correct module resolution
+- `run.sh` script provides consistent way to start server with venv activated
+
+**Verification Evidence**:
+- Venv has fastapi: `fastapi 0.121.2` ✅
+- Venv has uvicorn: `uvicorn 0.38.0` ✅
+- Server starts successfully when using venv's uvicorn ✅
+- Command: `source venv/bin/activate && uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000` ✅
+
 ## Files Touched
 - `.cursor/memory-bank/currentTaskContext.md` (this file)
 - `.cursor/memory-bank/progressTracking.md` (updated)
@@ -258,3 +306,4 @@
 - Build passes: `npm run build` ✅
 - Lint passes: No errors ✅
 - TypeScript compilation: No errors ✅
+- Server starts correctly when using venv: ✅

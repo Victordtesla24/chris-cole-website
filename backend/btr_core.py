@@ -27,6 +27,18 @@ if config.EPHE_PATH:
 # Set Lahiri ayanamsa for sidereal zodiac
 swe.set_sid_mode(swe.SIDM_LAHIRI)
 
+# Default strict BPHS orb (in degrees) for Gulika/Moon alignments
+STRICT_ORB_TOLERANCE = 0.5
+
+# Palā resolution for Prāṇa‑pada equality (BPHS 4.6, lines 1013–1019)
+PALA_DEGREES = 2.0  # 1 pala of Prana‑pada = 2°
+VIPALA_DEGREES = PALA_DEGREES / 60.0  # 1 vipala = 1/60 pala
+# Default tolerance: 1 palā (2°) resolution; strict mode: ~1/10 palā (~0.2°)
+PADA_EPSILON_DEGREES = PALA_DEGREES
+STRICT_PADA_EPSILON_DEGREES = PALA_DEGREES / 10.0
+# Time resolution: 1 palā = 24 seconds (BPHS traditional unit)
+PALA_SECONDS = 24.0
+
 # Mapping of weekday index (0=Sunday) to its ruling planet in the classical
 # sequence used by BPHS.  Indices correspond to the order of the seven days.
 _PLANET_ORDER = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn']
@@ -270,8 +282,8 @@ def calculate_gulika(date_local: datetime.date,
     sequence starts from the planet ruling the fifth weekday from the date.
 
     Returns a dictionary containing the gulika ascendant in degrees for the
-    daytime and nighttime segments, along with the mid‑times of those
-    periods in local time for debugging.
+    daytime and nighttime segments, along with the segment start‑times in
+    local time for debugging.
 
     Args:
         date_local: Calendar date in local time zone.
@@ -318,9 +330,9 @@ def calculate_gulika(date_local: datetime.date,
     # However, since we have 7 planets and 8 khandas, Saturn can occupy khandas 0-6
     # The formula (6 - weekday_idx) % 7 correctly identifies Saturn's khanda
     gulika_day_start = sunrise_local + datetime.timedelta(seconds=day_segment * gulika_khanda_index)
-    gulika_day_end = gulika_day_start + datetime.timedelta(seconds=day_segment)
-    gulika_day_mid = gulika_day_start + datetime.timedelta(seconds=day_segment / 2.0)
-    jd_gulika_day = _datetime_to_jd_ut(gulika_day_mid, tz_offset)
+    # BPHS 4.1-4.3: Treat Saturn's khanda itself as the Gulika ishta‑kāla.
+    # Use the Saturn segment boundary (start) rather than midpoint.
+    jd_gulika_day = _datetime_to_jd_ut(gulika_day_start, tz_offset)
     day_gulika_deg = compute_sidereal_lagna(jd_gulika_day, latitude, longitude)
 
     # Nighttime gulika (BPHS Verse 4.2)
@@ -334,16 +346,14 @@ def calculate_gulika(date_local: datetime.date,
     # Same sequence: starting from 5th weekday lord, find Saturn's position
     gulika_night_khanda_index = (6 - night_start_weekday_idx) % 7
     gulika_night_start = sunset_local + datetime.timedelta(seconds=night_segment * gulika_night_khanda_index)
-    gulika_night_end = gulika_night_start + datetime.timedelta(seconds=night_segment)
-    gulika_night_mid = gulika_night_start + datetime.timedelta(seconds=night_segment / 2.0)
-    jd_gulika_night = _datetime_to_jd_ut(gulika_night_mid, tz_offset)
+    jd_gulika_night = _datetime_to_jd_ut(gulika_night_start, tz_offset)
     night_gulika_deg = compute_sidereal_lagna(jd_gulika_night, latitude, longitude)
 
     return {
         'day_gulika_deg': day_gulika_deg,
         'night_gulika_deg': night_gulika_deg,
-        'day_gulika_time_local': gulika_day_mid,
-        'night_gulika_time_local': gulika_night_mid
+        'day_gulika_time_local': gulika_day_start,
+        'night_gulika_time_local': gulika_night_start
     }
 
 def calculate_ishta_kala(candidate_local: datetime.datetime,
@@ -662,7 +672,10 @@ def apply_bphs_hard_filters(lagna_deg: float,
                             pranapada_deg: float,
                             gulika_deg: float,
                             moon_deg: float,
-                            orb_tolerance: float = 2.0
+                            *,
+                            madhya_pranapada_deg: Optional[float] = None,
+                            orb_tolerance: float = 2.0,
+                            strict_bphs: bool = False
                             ) -> Tuple[bool, Dict[str, float]]:
     """Apply BPHS hard filters to a single candidate time.
 
@@ -672,17 +685,18 @@ def apply_bphs_hard_filters(lagna_deg: float,
       1. Trine rule (BPHS 4.10) - MANDATORY: the lagna sign must be in 1st, 5th, 
          or 9th from the Prāṇa‑pada sign (human band). If not satisfied, 
          candidate is rejected as non-human birth.
-      2. Lagna–Prāṇa‑pada degree equality (BPHS 4.6): the angular difference 
-         should be within a small orb (±2° by default).
+      2. Lagna–Prāṇa‑pada degree equality (BPHS 4.6): padekyata must hold at
+         palā granularity (1 palā = 2° of Prāṇa‑pada; see doc lines 1013–1019).
       3. Triple purification (BPHS 4.8): at least one of Prāṇa‑pada, Gulika, 
          or Moon must closely align with the lagna.
 
     Args:
         lagna_deg: Ascendant longitude in degrees.
         pranapada_deg: Sphuṭa Prāṇa‑pada longitude in degrees.
+        madhya_pranapada_deg: Madhya Prāṇa‑pada longitude in degrees (BPHS 4.5).
         gulika_deg: Gulika‑lagna longitude (choose appropriate day/night).
         moon_deg: Moon's longitude in degrees.
-        orb_tolerance: Allowed orb (degrees) for equality (default: 2.0°).
+        orb_tolerance: Allowed orb (degrees) for Gulika/Moon anchors (default: 2.0°).
 
     Returns:
         Tuple[bool, Dict[str, float]]: (is_accepted, scores)
@@ -698,31 +712,81 @@ def apply_bphs_hard_filters(lagna_deg: float,
     # Trine positions: 0 (1st), 4 (5th), 8 (9th)
     passes_trine = sign_diff in (0, 4, 8)
 
-    # BPHS Verse 4.6: Degree Matching
+    # BPHS Verse 4.6: Degree Matching (padekyata)
     # लग्नांशप्राणांशपदैक्यता स्यात्
     # "Lagna degrees and Pranapada degrees should be equal (पदैक्यता)"
-    delta_pp = _angular_difference(lagna_deg, pranapada_deg)
-    degree_match_score = max(0.0, (orb_tolerance - delta_pp) / orb_tolerance) * 100.0
-    degree_match_score = min(100.0, degree_match_score)
+    alignment_orb = STRICT_ORB_TOLERANCE if strict_bphs else orb_tolerance
+    padekyata_tolerance_sphuta = STRICT_PADA_EPSILON_DEGREES if strict_bphs else PADA_EPSILON_DEGREES
+    padekyata_tolerance_madhya = PADA_EPSILON_DEGREES if madhya_pranapada_deg is not None else padekyata_tolerance_sphuta
+    delta_sphuta_pp = _angular_difference(lagna_deg, pranapada_deg)
+    passes_padekyata_sphuta = delta_sphuta_pp <= padekyata_tolerance_sphuta
+    degree_match_score = 100.0 if passes_padekyata_sphuta else 0.0
+
+    delta_madhya_pp: Optional[float]
+    if madhya_pranapada_deg is not None:
+        delta_madhya_pp = _angular_difference(lagna_deg, madhya_pranapada_deg)
+        passes_padekyata_madhya = delta_madhya_pp <= padekyata_tolerance_madhya
+    else:
+        delta_madhya_pp = None
+        passes_padekyata_madhya = True
+
+    passes_padekyata = passes_padekyata_sphuta and passes_padekyata_madhya
 
     # BPHS Verse 4.8: Triple Verification
     # विना प्राणपदाच्छुद्धो गुलिकाद्वा निशाकराद्
     # "Must be verified by Pranapada OR Gulika OR Moon"
     # Check Gulika alignment (also check 7th from lagna as per some interpretations)
-    delta_gulika = min(_angular_difference(lagna_deg, gulika_deg),
-                       _angular_difference((lagna_deg + 180.0) % 360.0, gulika_deg))
-    gulika_score = max(0.0, (orb_tolerance - delta_gulika) / orb_tolerance) * 100.0
+    direct_gulika_delta = _angular_difference(lagna_deg, gulika_deg)
+    gulika_7th_delta = _angular_difference((lagna_deg + 180.0) % 360.0, gulika_deg)
+    delta_gulika = min(direct_gulika_delta, gulika_7th_delta)
+    gulika_anchor = 'gulika' if delta_gulika == direct_gulika_delta else 'gulika_7th'
+    gulika_score = max(0.0, (alignment_orb - delta_gulika) / alignment_orb) * 100.0
     gulika_score = min(100.0, gulika_score)
 
     # Check Moon alignment (निशाकराद्)
     delta_moon = _angular_difference(lagna_deg, moon_deg)
-    moon_score = max(0.0, (orb_tolerance - delta_moon) / orb_tolerance) * 100.0
+    moon_score = max(0.0, (alignment_orb - delta_moon) / alignment_orb) * 100.0
     moon_score = min(100.0, moon_score)
 
-    # Combined verification: at least one must pass (BPHS 4.8)
-    combined_verification = max(degree_match_score, gulika_score, moon_score)
+    purification_anchor = None
+    anchor_score = 0.0
 
-    is_accepted = passes_trine and (combined_verification > 0.0)
+    # Sequential purification: first Pranapada, else Moon, else Gulika (or its 7th).
+    if passes_padekyata:
+        purification_anchor = 'pranapada'
+        anchor_score = degree_match_score
+    elif delta_moon <= alignment_orb:
+        purification_anchor = 'moon'
+        anchor_score = moon_score
+    elif delta_gulika <= alignment_orb:
+        purification_anchor = 'gulika' if gulika_anchor == 'gulika' else 'gulika_7th'
+        anchor_score = gulika_score
+
+    combined_verification = anchor_score
+    passes_purification = purification_anchor is not None
+
+    # Accept only when the Trine Rule AND padekyata AND purification anchor are present.
+    is_accepted = passes_trine and passes_padekyata and passes_purification
+
+    rejection_reason = None
+    if not passes_trine:
+        # BPHS 4.10-4.11 non-human classifications by sign distance
+        if sign_diff in (2, 6, 10):
+            classification = 'pashu'  # terrestrial animals
+        elif sign_diff in (3, 7, 11):
+            classification = 'pakshi'  # birds
+        else:
+            classification = 'keeta_sarpa_jalachara'  # insects/reptiles/aquatic
+        rejection_reason = f"Non-human per BPHS 4.10-4.11 ({classification})"
+        non_human_classification = classification
+    elif not passes_padekyata:
+        rejection_reason = "Fails BPHS 4.6 padekyata (Lagna != Pranapada at palā resolution)"
+        non_human_classification = 'sthavara' if not passes_purification else None
+    elif not passes_purification:
+        rejection_reason = "Fails BPHS 4.8 purification sequence (no Prāṇa‑pada, Moon, or Gulika anchor)"
+        non_human_classification = 'sthavara'
+    else:
+        non_human_classification = None
 
     scores = {
         'degree_match': round(degree_match_score, 2),
@@ -730,7 +794,18 @@ def apply_bphs_hard_filters(lagna_deg: float,
         'moon_alignment': round(moon_score, 2),
         'combined_verification': round(combined_verification, 2),
         'passes_trine_rule': passes_trine,
-        'delta_pranapada_deg': round(delta_pp, 2)
+        'passes_padekyata': passes_padekyata,
+        'passes_padekyata_sphuta': passes_padekyata_sphuta,
+        'passes_padekyata_madhya': passes_padekyata_madhya,
+        'padekyata_tolerance_deg': round(padekyata_tolerance_sphuta, 4),
+        'padekyata_tolerance_madhya_deg': round(padekyata_tolerance_madhya, 4),
+        'passes_purification': passes_purification,
+        'purification_anchor': purification_anchor,
+        'gulika_anchor': gulika_anchor,
+        'non_human_classification': non_human_classification,
+        'rejection_reason': rejection_reason,
+        'delta_pranapada_deg': round(delta_sphuta_pp, 4),
+        'delta_madhya_pranapada_deg': round(delta_madhya_pp, 4) if delta_madhya_pp is not None else None
     }
 
     return is_accepted, scores
@@ -988,10 +1063,37 @@ def score_physical_traits(lagna_deg: float, planets: Dict[str, float], traits: D
     """
     scores = {}
     lagna_sign = int(math.floor(lagna_deg / 30.0)) % 12
+    # Normalise incoming traits to legacy bands while accepting granular inputs
+    height_trait = None
+    build_trait = None
+    complexion_trait = None
+
+    if traits:
+        height_trait = str(traits.get('height') or traits.get('height_band') or '').upper() or None
+        build_trait = str(traits.get('build') or traits.get('build_band') or '').upper() or None
+        complexion_trait = str(traits.get('complexion') or traits.get('complexion_tone') or '').upper() or None
+        if not height_trait:
+            try:
+                height_cm = float(traits.get('height_cm', 0.0))
+                if height_cm >= 175:
+                    height_trait = 'TALL'
+                elif height_cm <= 160:
+                    height_trait = 'SHORT'
+                elif height_cm > 0:
+                    height_trait = 'MEDIUM'
+            except (TypeError, ValueError):
+                height_trait = None
+        if not build_trait and traits.get('body_frame'):
+            frame = str(traits['body_frame']).lower()
+            if 'athletic' in frame or 'muscular' in frame:
+                build_trait = 'ATHLETIC'
+            elif 'slim' in frame or 'ecto' in frame:
+                build_trait = 'SLIM'
+            elif 'heavy' in frame or 'broad' in frame or 'endo' in frame:
+                build_trait = 'HEAVY'
     
     # Height scoring (BPHS 2.6-2.23)
-    if 'height' in traits:
-        height_trait = traits['height'].upper()
+    if height_trait:
         # Large body: Aries(0), Taurus(1), Leo(4), Capricorn(9)
         # Medium body: Gemini(2), Virgo(5), Libra(6), Aquarius(10), Pisces(11)
         # Small body: Cancer(3), Scorpio(7)
@@ -1016,8 +1118,7 @@ def score_physical_traits(lagna_deg: float, planets: Dict[str, float], traits: D
         scores['height'] = 0.0
     
     # Build scoring (based on lagnesh and planets in lagna)
-    if 'build' in traits:
-        build_trait = traits['build'].upper()
+    if build_trait:
         lagnesh = _get_sign_lord(lagna_sign)
         
         # Check planets in lagna (within 5 degrees)
@@ -1047,8 +1148,7 @@ def score_physical_traits(lagna_deg: float, planets: Dict[str, float], traits: D
         scores['build'] = 0.0
     
     # Complexion scoring (BPHS 2.5, 2.16)
-    if 'complexion' in traits:
-        complexion_trait = traits['complexion'].upper()
+    if complexion_trait:
         lagna_deg_in_sign = lagna_deg % 30.0
         
         # Check planets in lagna
@@ -1106,11 +1206,32 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: Dict[str, 
         Dict with scores (0-100) for each event category.
     """
     scores = {}
+    events = events or {}
+
+    def _first_date(item: Any) -> Optional[str]:
+        if isinstance(item, str):
+            return item
+        if isinstance(item, dict):
+            date_val = item.get('date')
+            return date_val
+        return None
     
     # Marriage verification (D-9 Navamsa, 7th house)
-    if 'marriage' in events and events['marriage'] and 'date' in events['marriage']:
+    marriage_entry = events.get('marriage')
+    marriage_list = events.get('marriages') if isinstance(events.get('marriages'), list) else None
+    marriage_date_str = None
+    if marriage_entry:
+        marriage_date_str = _first_date(marriage_entry)
+    if not marriage_date_str and marriage_list:
+        for m in marriage_list:
+            md = _first_date(m)
+            if md:
+                marriage_date_str = md
+                break
+
+    if marriage_date_str:
         try:
-            marriage_date = datetime.datetime.strptime(events['marriage']['date'], '%Y-%m-%d').date()
+            marriage_date = datetime.datetime.strptime(marriage_date_str, '%Y-%m-%d').date()
             dasha_at_marriage = get_dasha_at_date(jd_ut_birth, marriage_date, moon_longitude)
             
             # Calculate D-9 chart
@@ -1135,9 +1256,22 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: Dict[str, 
         scores['marriage'] = 0.0
     
     # Children verification (D-7 Saptamsa, 5th house)
-    if 'children' in events and events['children']:
-        children_count = events['children'].get('count', 0)
-        children_dates = events['children'].get('dates', [])
+    children_entries = events.get('children')
+    if children_entries:
+        child_dates: List[str] = []
+        if isinstance(children_entries, list):
+            for child in children_entries:
+                cd = _first_date(child)
+                if cd:
+                    child_dates.append(cd)
+        elif isinstance(children_entries, dict):
+            child_dates = children_entries.get('dates', [])
+            if not child_dates and 'date' in children_entries:
+                cd = _first_date(children_entries)
+                if cd:
+                    child_dates = [cd]
+        children_count = len(child_dates)
+        children_dates = child_dates
         
         if children_count > 0 and children_dates:
             # Calculate D-7 chart
@@ -1176,7 +1310,15 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: Dict[str, 
     
     # Career verification (D-10 Dasamsa, 10th house, BPHS 12.211)
     if 'career' in events and events['career']:
-        career_dates = events['career'] if isinstance(events['career'], list) else []
+        career_dates_raw = events['career']
+        career_dates: List[str] = []
+        if isinstance(career_dates_raw, list):
+            for entry in career_dates_raw:
+                cd = _first_date(entry)
+                if cd:
+                    career_dates.append(cd)
+        else:
+            career_dates = career_dates_raw if isinstance(career_dates_raw, list) else []
         
         if career_dates:
             # Calculate D-10 chart
@@ -1213,6 +1355,33 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: Dict[str, 
             scores['career'] = 0.0
     else:
         scores['career'] = 0.0
+
+    # Major events (health/relocation/awards) - dashā alignment heuristic
+    if 'major' in events and events['major']:
+        major_events_raw = events['major']
+        major_dates: List[str] = []
+        if isinstance(major_events_raw, list):
+            for entry in major_events_raw:
+                ed = _first_date(entry)
+                if ed:
+                    major_dates.append(ed)
+        if major_dates:
+            major_scores = []
+            for major_date in major_dates:
+                try:
+                    event_date = datetime.datetime.strptime(major_date, '%Y-%m-%d').date()
+                    dasha = get_dasha_at_date(jd_ut_birth, event_date, moon_longitude)
+                    # Benefic dashas for stability/health/recognition per general BPHS benefic list
+                    benefic_dashas = ['jupiter', 'venus', 'moon', 'mercury']
+                    score = 80.0 if dasha['mahadasha'].lower() in benefic_dashas else 60.0
+                    major_scores.append(score)
+                except (ValueError, KeyError):
+                    major_scores.append(50.0)
+            scores['major'] = sum(major_scores) / len(major_scores) if major_scores else 0.0
+        else:
+            scores['major'] = 0.0
+    else:
+        scores['major'] = 0.0
     
     # Calculate overall life events score
     event_scores = [s for s in scores.values() if s > 0]
@@ -1229,7 +1398,14 @@ def search_candidate_times(dob: datetime.date,
                            tz_offset: float,
                            start_time_str: str,
                            end_time_str: str,
-                           step_minutes: int = 10,
+                           step_minutes: Optional[float] = None,
+                           step_palas: float = 1.0,
+                           strict_bphs: bool = False,
+                           orb_tolerance: float = 2.0,
+                           enable_shodhana: bool = False,
+                           max_shodhana_palas: int = 3600,
+                           bphs_only_ordering: bool = True,
+                           collect_rejections: bool = False,
                            sunrise_local: Optional[datetime.datetime] = None,
                            sunset_local: Optional[datetime.datetime] = None,
                            gulika_info: Optional[Dict[str, float]] = None,
@@ -1245,7 +1421,8 @@ def search_candidate_times(dob: datetime.date,
         tz_offset: Time zone offset from UTC in hours.
         start_time_str: Starting local time ("HH:MM").
         end_time_str: Ending local time ("HH:MM").
-        step_minutes: Step size between candidate times.
+        step_minutes: Step size between candidate times in minutes (optional override).
+        step_palas: Palā-based step size (1 palā = 24 seconds). Used when step_minutes is None.
         sunrise_local: Optionally precomputed sunrise time.
         sunset_local: Optionally precomputed sunset time.
         gulika_info: Optionally precomputed gulika calculation dictionary.
@@ -1262,6 +1439,169 @@ def search_candidate_times(dob: datetime.date,
     day_gulika_deg = gulika_info['day_gulika_deg']
     night_gulika_deg = gulika_info['night_gulika_deg']
 
+    def gulika_for_time(dt: datetime.datetime) -> float:
+        """Pick day/night Gulika based on local time."""
+        return day_gulika_deg if sunrise_local <= dt <= sunset_local else night_gulika_deg
+
+    def evaluate_candidate(candidate_dt: datetime.datetime, gulika_deg_value: float) -> Dict[str, Any]:
+        """Compute all dependent values for a candidate time."""
+        jd_ut_val = _datetime_to_jd_ut(candidate_dt, tz_offset)
+        lagna_val = compute_sidereal_lagna(jd_ut_val, latitude, longitude)
+        planets_val = get_planet_positions(jd_ut_val)
+        sun_val = planets_val['sun']
+        moon_val = planets_val['moon']
+        saturn_val = planets_val['saturn']
+
+        ghatis, palas, total_palas = calculate_ishta_kala(candidate_dt, sunrise_local)
+        madhya_pp_val = calculate_madhya_pranapada(ghatis, palas)
+        sphuta_pp_val = calculate_sphuta_pranapada(total_palas, sun_val)
+        special_lagnas_val = calculate_special_lagnas((ghatis, palas, total_palas), sun_val, lagna_val)
+        nisheka_val = calculate_nisheka_lagna(saturn_val, gulika_deg_value, lagna_val)
+
+        accepted_val, scores_val = apply_bphs_hard_filters(
+            lagna_val, sphuta_pp_val, gulika_deg_value, moon_val,
+            madhya_pranapada_deg=madhya_pp_val,
+            orb_tolerance=orb_tolerance,
+            strict_bphs=strict_bphs
+        )
+
+        return {
+            'jd_ut': jd_ut_val,
+            'lagna_deg': lagna_val,
+            'planets': planets_val,
+            'sun_deg': sun_val,
+            'moon_deg': moon_val,
+            'saturn_deg': saturn_val,
+            'ghatis': ghatis,
+            'palas': palas,
+            'total_palas': total_palas,
+            'madhya_pp': madhya_pp_val,
+            'sphuta_pp': sphuta_pp_val,
+            'special_lagnas': special_lagnas_val,
+            'nisheka': nisheka_val,
+            'accepted': accepted_val,
+            'scores': scores_val
+        }
+
+    def evaluate_and_score(candidate_dt: datetime.datetime) -> Dict[str, Any]:
+        """Evaluate candidate and attach optional trait/event scores."""
+        gulika_deg_value = gulika_for_time(candidate_dt)
+        eval_result = evaluate_candidate(candidate_dt, gulika_deg_value)
+
+        traits_scores: Dict[str, float] = {}
+        if optional_traits:
+            traits_scores = score_physical_traits(eval_result['lagna_deg'], eval_result['planets'], optional_traits)
+
+        events_scores: Dict[str, float] = {}
+        if optional_events:
+            jd_ut_birth = eval_result['jd_ut']
+            events_scores = verify_life_events(jd_ut_birth, eval_result['lagna_deg'], eval_result['planets'], optional_events, eval_result['moon_deg'])
+
+        return {
+            'eval': eval_result,
+            'traits_scores': traits_scores,
+            'events_scores': events_scores,
+            'gulika_deg': gulika_deg_value
+        }
+
+    def compose_candidate_record(candidate_dt: datetime.datetime,
+                                 eval_result: Dict[str, Any],
+                                 traits_scores: Dict[str, float],
+                                 events_scores: Dict[str, float],
+                                 special_lagnas_val: Dict[str, float],
+                                 nisheka_val: Dict[str, Any],
+                                 shodhana_delta_palas: Optional[int] = None) -> Dict[str, Any]:
+        """Create the candidate payload with composite scoring."""
+        scores = eval_result['scores']
+        bphs_score = (
+            (100.0 if scores['passes_trine_rule'] else 0.0) * 0.40 +
+            scores['degree_match'] * 0.30 +
+            scores['combined_verification'] * 0.30
+        )
+        heuristic_score = (
+            (traits_scores.get('overall', 0.0) if traits_scores else 0.0) * 0.40 +
+            (events_scores.get('overall', 0.0) if events_scores else 0.0) * 0.40 +
+            nisheka_val['gestation_score'] * 0.20
+        )
+        composite_score = bphs_score  # Preserve BPHS purity for default ordering
+
+        candidate_record = {
+            'time_local': candidate_dt.strftime('%Y-%m-%dT%H:%M:%S'),
+            'lagna_deg': round(eval_result['lagna_deg'], 2),
+            'pranapada_deg': round(eval_result['sphuta_pp'], 2),
+            'madhya_pranapada_deg': round(eval_result['madhya_pp'], 2),
+            'delta_pp_deg': scores['delta_pranapada_deg'],
+            'delta_madhya_pp_deg': scores.get('delta_madhya_pranapada_deg'),
+            'passes_trine_rule': scores['passes_trine_rule'],
+            'purification_anchor': scores.get('purification_anchor'),
+            'verification_scores': {
+                'degree_match': scores['degree_match'],
+                'gulika_alignment': scores['gulika_alignment'],
+                'moon_alignment': scores['moon_alignment'],
+                'combined_verification': scores['combined_verification'],
+                'passes_padekyata_sphuta': scores['passes_padekyata_sphuta'],
+                'passes_padekyata_madhya': scores['passes_padekyata_madhya']
+            },
+            'bphs_score': round(bphs_score, 2),
+            'heuristic_score': round(heuristic_score, 2),
+            'special_lagnas': {
+                'bhava_lagna': round(special_lagnas_val['bhava_lagna'], 2),
+                'hora_lagna': round(special_lagnas_val['hora_lagna'], 2),
+                'ghati_lagna': round(special_lagnas_val['ghati_lagna'], 2),
+                'varnada_lagna': round(special_lagnas_val['varnada_lagna'], 2)
+            },
+            'nisheka': {
+                'nisheka_lagna_deg': round(nisheka_val['nisheka_lagna_deg'], 2),
+                'gestation_months': round(nisheka_val['gestation_months'], 2),
+                'is_realistic': nisheka_val['is_realistic'],
+                'gestation_score': round(nisheka_val['gestation_score'], 2)
+            },
+            'composite_score': round(composite_score, 2)
+        }
+
+        if traits_scores:
+            candidate_record['physical_traits_scores'] = {
+                k: round(v, 2) for k, v in traits_scores.items()
+            }
+
+        if events_scores:
+            candidate_record['life_events_scores'] = {
+                k: round(v, 2) for k, v in events_scores.items()
+            }
+            candidate_record['heuristic_components'] = {
+                'traits_overall': round(traits_scores.get('overall', 0.0), 2) if traits_scores else 0.0,
+                'events_overall': round(events_scores.get('overall', 0.0), 2),
+                'gestation_score': round(nisheka_val['gestation_score'], 2)
+            }
+
+        if shodhana_delta_palas is not None:
+            candidate_record['shodhana_delta_palas'] = shodhana_delta_palas
+
+        return candidate_record
+
+    def perform_shodhana(base_dt: datetime.datetime) -> Optional[Dict[str, Any]]:
+        """Deterministic palā-by-palā shodhana search for padekyatā + trine compliance."""
+        best_candidate: Optional[Dict[str, Any]] = None
+        for delta_palas in range(1, max_shodhana_palas + 1):
+            for direction in (-1, 1):
+                adj_dt = base_dt + datetime.timedelta(seconds=direction * delta_palas * PALA_SECONDS)
+                adj_bundle = evaluate_and_score(adj_dt)
+                adj_eval = adj_bundle['eval']
+                if adj_eval['accepted']:
+                    best_candidate = compose_candidate_record(
+                        adj_dt,
+                        adj_eval,
+                        adj_bundle['traits_scores'],
+                        adj_bundle['events_scores'],
+                        adj_eval['special_lagnas'],
+                        adj_eval['nisheka'],
+                        shodhana_delta_palas=direction * delta_palas
+                    )
+                    break
+            if best_candidate is not None:
+                break
+        return best_candidate
+
     start_hour, start_min = map(int, start_time_str.split(':'))
     end_hour, end_min = map(int, end_time_str.split(':'))
     start_dt = datetime.datetime.combine(dob, datetime.time(start_hour, start_min))
@@ -1271,100 +1611,73 @@ def search_candidate_times(dob: datetime.date,
         wrap_midnight = True
         end_dt = end_dt + datetime.timedelta(days=1)
 
+    if step_minutes is not None:
+        if step_minutes <= 0:
+            raise ValueError("step_minutes must be positive")
+        step_seconds = step_minutes * 60.0
+    else:
+        if step_palas <= 0:
+            raise ValueError("step_palas must be positive")
+        step_seconds = step_palas * PALA_SECONDS
+
     candidates = []
+    rejections: List[Dict[str, Any]] = []
     current_dt = start_dt
     while current_dt <= end_dt:
         candidate_local = current_dt
-        use_day_gulika = sunrise_local <= candidate_local <= sunset_local
-        gulika_deg = day_gulika_deg if use_day_gulika else night_gulika_deg
+        gulika_deg = gulika_for_time(candidate_local)
 
-        jd_ut = _datetime_to_jd_ut(candidate_local, tz_offset)
-        lagna_deg = compute_sidereal_lagna(jd_ut, latitude, longitude)
-        planets = get_planet_positions(jd_ut)
-        sun_deg = planets['sun']
-        moon_deg = planets['moon']
-        saturn_deg = planets['saturn']
+        eval_result = evaluate_candidate(candidate_local, gulika_deg)
+        accepted = eval_result['accepted']
+        scores = eval_result['scores']
+        sphuta_pp = eval_result['sphuta_pp']
+        lagna_deg = eval_result['lagna_deg']
+        special_lagnas = eval_result['special_lagnas']
+        nisheka = eval_result['nisheka']
         
-        ghatis, palas, total_palas = calculate_ishta_kala(candidate_local, sunrise_local)
-        madhya_pp = calculate_madhya_pranapada(ghatis, palas)
-        sphuta_pp = calculate_sphuta_pranapada(total_palas, sun_deg)
-        
-        # Calculate special lagnas
-        special_lagnas = calculate_special_lagnas((ghatis, palas, total_palas), sun_deg, lagna_deg)
-        
-        # Calculate Nisheka lagna
-        nisheka = calculate_nisheka_lagna(saturn_deg, gulika_deg, lagna_deg)
-        
-        accepted, scores = apply_bphs_hard_filters(lagna_deg, sphuta_pp, gulika_deg, moon_deg)
         if accepted:
             # Calculate physical traits scores if provided
             traits_scores = {}
             if optional_traits:
-                traits_scores = score_physical_traits(lagna_deg, planets, optional_traits)
+                traits_scores = score_physical_traits(lagna_deg, eval_result['planets'], optional_traits)
             
             # Calculate life events scores if provided
             events_scores = {}
             if optional_events:
-                jd_ut_birth = jd_ut
-                events_scores = verify_life_events(jd_ut_birth, lagna_deg, planets, optional_events, moon_deg)
+                jd_ut_birth = eval_result['jd_ut']
+                events_scores = verify_life_events(jd_ut_birth, lagna_deg, eval_result['planets'], optional_events, eval_result['moon_deg'])
             
-            # Calculate enhanced composite score
-            # BPHS hard filters: 50% (degree_match: 20%, trine: 15%, verification: 15%)
-            # Physical traits: 20% (if provided, else 0%)
-            # Life events: 20% (if provided, else 0%)
-            # Nisheka: 10%
-            composite_score = (
-                scores['degree_match'] * 0.20 +
-                (100.0 if scores['passes_trine_rule'] else 0.0) * 0.15 +
-                scores['combined_verification'] * 0.15 +
-                (traits_scores.get('overall', 0.0) if traits_scores else 0.0) * 0.20 +
-                (events_scores.get('overall', 0.0) if events_scores else 0.0) * 0.20 +
-                nisheka['gestation_score'] * 0.10
+            candidate_record = compose_candidate_record(
+                candidate_local,
+                eval_result,
+                traits_scores,
+                events_scores,
+                special_lagnas,
+                nisheka
             )
-            
-            candidate_record = {
-                'time_local': candidate_local.strftime('%Y-%m-%dT%H:%M:%S'),
-                'lagna_deg': round(lagna_deg, 2),
-                'pranapada_deg': round(sphuta_pp, 2),
-                'delta_pp_deg': scores['delta_pranapada_deg'],
-                'passes_trine_rule': scores['passes_trine_rule'],
-                'verification_scores': {
-                    'degree_match': scores['degree_match'],
-                    'gulika_alignment': scores['gulika_alignment'],
-                    'moon_alignment': scores['moon_alignment'],
-                    'combined_verification': scores['combined_verification']
-                },
-                'special_lagnas': {
-                    'bhava_lagna': round(special_lagnas['bhava_lagna'], 2),
-                    'hora_lagna': round(special_lagnas['hora_lagna'], 2),
-                    'ghati_lagna': round(special_lagnas['ghati_lagna'], 2),
-                    'varnada_lagna': round(special_lagnas['varnada_lagna'], 2)
-                },
-                'nisheka': {
-                    'nisheka_lagna_deg': round(nisheka['nisheka_lagna_deg'], 2),
-                    'gestation_months': round(nisheka['gestation_months'], 2),
-                    'is_realistic': nisheka['is_realistic'],
-                    'gestation_score': round(nisheka['gestation_score'], 2)
-                },
-                'composite_score': round(composite_score, 2)
-            }
-            
-            # Add physical traits scores if calculated
-            if traits_scores:
-                candidate_record['physical_traits_scores'] = {
-                    k: round(v, 2) for k, v in traits_scores.items()
-                }
-            
-            # Add life events scores if calculated
-            if events_scores:
-                candidate_record['life_events_scores'] = {
-                    k: round(v, 2) for k, v in events_scores.items()
-                }
-            
             candidates.append(candidate_record)
-        current_dt += datetime.timedelta(minutes=step_minutes)
+        else:
+            if enable_shodhana:
+                shodhana_candidate = perform_shodhana(candidate_local)
+                if shodhana_candidate:
+                    candidates.append(shodhana_candidate)
+                    current_dt += datetime.timedelta(seconds=step_seconds)
+                    continue
+            if collect_rejections:
+                rejections.append({
+                    'time_local': candidate_local.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'lagna_deg': round(lagna_deg, 2),
+                    'pranapada_deg': round(sphuta_pp, 2),
+                    'passes_trine_rule': scores.get('passes_trine_rule', False),
+                    'passes_purification': scores.get('passes_purification', False),
+                    'non_human_classification': scores.get('non_human_classification'),
+                    'rejection_reason': scores.get('rejection_reason')
+                })
+        current_dt += datetime.timedelta(seconds=step_seconds)
     
-    # Sort candidates by composite score (descending)
-    candidates.sort(key=lambda x: x.get('composite_score', 0.0), reverse=True)
-    
+    # Sort candidates by BPHS-only score when requested, else composite score.
+    key_field = 'bphs_score' if bphs_only_ordering else 'composite_score'
+    candidates.sort(key=lambda x: x.get(key_field, 0.0), reverse=True)
+    if collect_rejections:
+        return candidates, rejections
     return candidates

@@ -61,11 +61,12 @@ export function ResultsDisplay({ data, onNewCalculation }: ResultsDisplayProps) 
   const confidence = bestCandidate?.composite_score 
     ? getConfidenceGrade(bestCandidate.composite_score)
     : { grade: 'N/A', label: 'Not Available', color: '#999' };
+  const bestBphsScore = bestCandidate?.bphs_score ?? null;
 
   return (
     <div className="result-container">
       <div className="result-header">
-        <h2>Phase 8: Final Output - Birth Time Rectification Result</h2>
+        <h2>BPHS Birth Time Result (Adhyāya 4 linkage)</h2>
         {onNewCalculation && (
           <button className="btn-new-calculation" onClick={onNewCalculation}>
             New Calculation
@@ -76,43 +77,52 @@ export function ResultsDisplay({ data, onNewCalculation }: ResultsDisplayProps) 
       {/* Phase Overview */}
       {showPhases && (
         <div className="phase-overview">
-          <h3>BPHS Workflow Phases Completed</h3>
+          <h3>BPHS Workflow Phases Completed (with verse links)</h3>
           <div className="phases-grid">
             <div className="phase-item completed">
               <div className="phase-number">0</div>
-              <div className="phase-name">Input Collection</div>
+              <div className="phase-name">Set birth clock from sunrise</div>
+              <div className="phase-note">Sunrise time → ghāṭī/palā (Adhyāya 4, V.1-3)</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">1</div>
-              <div className="phase-name">Candidate Generation</div>
+              <div className="phase-name">Check every palā moment</div>
+              <div className="phase-note">Sample every palā so no verse-compliant time is skipped</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">2</div>
-              <div className="phase-name">Gulika Calculation</div>
+              <div className="phase-name">Place Gulika marker</div>
+              <div className="phase-note">Saturn’s portion of day/night (Adhyāya 4, V.1-3)</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">3</div>
-              <div className="phase-name">Pranapada Calculation</div>
+              <div className="phase-name">Build dual Prāṇapada</div>
+              <div className="phase-note">“घटी चतुर्गुणा...” &amp; “स्वेष्टकालं...” (Adhyāya 4, V.5 &amp; 7)</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">4</div>
-              <div className="phase-name">Hard BPHS Filters</div>
+              <div className="phase-name">Apply BPHS gates</div>
+              <div className="phase-note">Trine rule + purification “विना प्राणपदाच्छुद्धो...” (Adhyāya 4, V.8 &amp; 10)</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">5</div>
-              <div className="phase-name">Special Lagnas</div>
+              <div className="phase-name">Show supporting lagnas</div>
+              <div className="phase-note">Bhava/Hora/Ghati/Varnada (Adhyāya 4, V.18-28)</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">6</div>
-              <div className="phase-name">Nisheka Lagna</div>
+              <div className="phase-name">Trace conception link</div>
+              <div className="phase-note">Conception link (Adhyāya 4, V.12-16)</div>
             </div>
             <div className="phase-item completed">
               <div className="phase-number">7</div>
-              <div className="phase-name">Scoring & Ranking</div>
+              <div className="phase-name">BPHS-first scoring</div>
+              <div className="phase-note">BPHS score first; traits/events shown separately</div>
             </div>
             <div className="phase-item completed active">
               <div className="phase-number">8</div>
-              <div className="phase-name">Final Output</div>
+              <div className="phase-name">Your verse-linked result</div>
+              <div className="phase-note">Verse-cited results you can trace in docs/पराशरहोराशास्त्र Brihat Parashar Hora Shastra _djvu.txt</div>
             </div>
           </div>
         </div>
@@ -139,6 +149,11 @@ export function ResultsDisplay({ data, onNewCalculation }: ResultsDisplayProps) 
               <div className="confidence-grade" style={{ color: confidence.color }}>
                 Grade {confidence.grade} - {confidence.label}
               </div>
+              {bestBphsScore !== null && (
+                <div className="confidence-grade" style={{ fontSize: '0.9rem' }}>
+                  BPHS-Only Score: {bestBphsScore.toFixed(1)}
+                </div>
+              )}
               <div className="accuracy-range">Accuracy Range: ±5 minutes</div>
             </div>
           </div>
@@ -232,6 +247,28 @@ export function ResultsDisplay({ data, onNewCalculation }: ResultsDisplayProps) 
                     <td>{bestCandidate.nisheka.is_realistic ? '✓' : '❌'}</td>
                   </tr>
                 )}
+                {bestCandidate.purification_anchor && (
+                  <tr>
+                    <td>Purification Anchor (BPHS 4.8)</td>
+                    <td colSpan={2}>{bestCandidate.purification_anchor}</td>
+                  </tr>
+                )}
+                {bestCandidate.shodhana_delta_palas !== null && bestCandidate.shodhana_delta_palas !== undefined && (
+                  <tr>
+                    <td>Shodhana Adjustment</td>
+                    <td colSpan={2}>
+                      {bestCandidate.shodhana_delta_palas > 0 ? '+' : ''}
+                      {bestCandidate.shodhana_delta_palas} palas applied to enforce lagna–Pranapada equality (BPHS 4.6)
+                    </td>
+                  </tr>
+                )}
+                {bestBphsScore !== null && (
+                  <tr>
+                    <td>BPHS-Only Score</td>
+                    <td>{bestBphsScore.toFixed(1)}</td>
+                    <td>Method: BPHS 4.5–4.10 only</td>
+                  </tr>
+                )}
                 <tr className="total-row">
                   <td><strong>TOTAL</strong></td>
                   <td><strong>{bestCandidate.composite_score?.toFixed(1) || 'N/A'}/100</strong></td>
@@ -262,6 +299,44 @@ export function ResultsDisplay({ data, onNewCalculation }: ResultsDisplayProps) 
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Rejections for Transparency */}
+      {data.rejections && data.rejections.length > 0 && (
+        <div className="result-section">
+          <h3>Rejected Times (Transparency)</h3>
+          <p className="rejections-note">
+            Reasons per BPHS 4.8–4.11 for filtered-out times.
+          </p>
+          <div className="verification-table-container">
+            <table className="verification-table">
+              <thead>
+                <tr>
+                  <th>Time (Local)</th>
+                  <th>Lagna</th>
+                  <th>Pranapada</th>
+                  <th>Trine?</th>
+                  <th>Purified?</th>
+                  <th>Classification</th>
+                  <th>Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.rejections.map((rej) => (
+                  <tr key={rej.time_local}>
+                    <td>{rej.time_local}</td>
+                    <td>{degToSign(rej.lagna_deg)}</td>
+                    <td>{degToSign(rej.pranapada_deg)}</td>
+                    <td>{rej.passes_trine_rule ? 'Yes' : 'No'}</td>
+                    <td>{rej.passes_purification ? 'Yes' : 'No'}</td>
+                    <td>{rej.non_human_classification || '—'}</td>
+                    <td>{rej.rejection_reason || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -330,4 +405,3 @@ export function ResultsDisplay({ data, onNewCalculation }: ResultsDisplayProps) 
     </div>
   );
 }
-

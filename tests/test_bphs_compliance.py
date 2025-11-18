@@ -135,10 +135,15 @@ class TestTrineRuleBPHSCompliance:
         
         for lagna_deg in valid_lagnas:
             accepted, scores = btr_core.apply_bphs_hard_filters(
-                lagna_deg, pranapada_deg, 50.0, 48.0
+                lagna_deg, pranapada_deg, lagna_deg, 48.0  # Gulika aligned for purification
             )
             assert scores['passes_trine_rule'] is True, f"Trine rule should pass for lagna {lagna_deg}°"
-            assert accepted is True, f"Candidate should be accepted for lagna {lagna_deg}°"
+            if lagna_deg == pranapada_deg:
+                assert scores['passes_padekyata'] is True
+                assert accepted is True, f"Candidate should be accepted for lagna {lagna_deg}°"
+            else:
+                assert scores['passes_padekyata'] is False
+                assert accepted is False, "Padekyata is mandatory even when trine is satisfied"
         
         # Test invalid non-trine positions
         invalid_lagnas = [
@@ -175,10 +180,15 @@ class TestTrineRuleBPHSCompliance:
         
         for lagna_deg in valid_lagnas:
             accepted, scores = btr_core.apply_bphs_hard_filters(
-                lagna_deg, pranapada_deg, 50.0, 48.0
+                lagna_deg, pranapada_deg, lagna_deg, 48.0  # Gulika aligned for purification
             )
             assert scores['passes_trine_rule'] is True
-            assert accepted is True
+            if lagna_deg == pranapada_deg:
+                assert scores['passes_padekyata'] is True
+                assert accepted is True
+            else:
+                assert scores['passes_padekyata'] is False
+                assert accepted is False
 
 
 class TestDegreeMatchingBPHSCompliance:
@@ -196,23 +206,30 @@ class TestDegreeMatchingBPHSCompliance:
         accepted, scores = btr_core.apply_bphs_hard_filters(
             lagna_deg, pranapada_deg, 50.0, 48.0
         )
+        assert scores['passes_padekyata'] is True
         assert scores['degree_match'] == 100.0, "Perfect match should score 100"
+        assert accepted is True
         
-        # Within tolerance (±2°)
+        # Within palā resolution (≤ 1 palā = 2°)
         lagna_deg = 135.0
-        pranapada_deg = 136.0  # 1° difference
+        pranapada_deg = 136.5  # Difference below palā tolerance
         accepted, scores = btr_core.apply_bphs_hard_filters(
             lagna_deg, pranapada_deg, 50.0, 48.0
         )
-        assert scores['degree_match'] > 50.0, "1° difference should score > 50"
+        assert scores['passes_padekyata'] is True
+        assert scores['degree_match'] == 100.0, "Palā-level agreement should remain perfect"
+        assert accepted is True
         
-        # Outside tolerance
+        # Beyond palā resolution should fail padekyata outright (> 2°)
         lagna_deg = 135.0
-        pranapada_deg = 140.0  # 5° difference
+        pranapada_deg = 137.5  # > 1 palā (2°) difference
         accepted, scores = btr_core.apply_bphs_hard_filters(
             lagna_deg, pranapada_deg, 50.0, 48.0
         )
-        assert scores['degree_match'] < 50.0, "5° difference should score < 50"
+        assert scores['passes_padekyata'] is False
+        assert scores['degree_match'] == 0.0, "Mismatch beyond palā must score 0"
+        assert scores['combined_verification'] == 0.0
+        assert accepted is False
 
 
 class TestTripleVerificationBPHSCompliance:
@@ -248,10 +265,12 @@ class TestTripleVerificationBPHSCompliance:
             lagna_deg, pranapada_deg, gulika_deg, moon_deg
         )
         
-        # Should pass because Gulika matches (BPHS 4.8)
-        assert scores['combined_verification'] > 0.0
-        assert accepted is True
-    
+        # Gulika aligns (sequential fallback) but Pranapada padekyata remains mandatory for acceptance.
+        assert scores['passes_padekyata'] is False
+        assert scores['purification_anchor'] in ('gulika', 'gulika_7th')
+        assert scores['passes_purification'] is True
+        assert accepted is False
+
     def test_triple_verification_moon(self):
         """Test verification via Moon alignment."""
         lagna_deg = 135.0
@@ -263,9 +282,35 @@ class TestTripleVerificationBPHSCompliance:
             lagna_deg, pranapada_deg, gulika_deg, moon_deg
         )
         
-        # Should pass because Moon matches (BPHS 4.8)
-        assert scores['combined_verification'] > 0.0
-        assert accepted is True
+        # Moon aligns (sequential fallback) but Pranapada padekyata remains mandatory for acceptance.
+        assert scores['passes_padekyata'] is False
+        assert scores['purification_anchor'] == 'moon'
+        assert scores['passes_purification'] is True
+        assert accepted is False
+
+    def test_non_trine_classification_animals(self):
+        """BPHS 4.10-4.11 classification for non-human (animal band)."""
+        pranapada_deg = 0.0   # Aries
+        lagna_deg = 60.0      # Gemini (2nd from Aries) -> पशु
+        accepted, scores = btr_core.apply_bphs_hard_filters(
+            lagna_deg, pranapada_deg, 120.0, 240.0
+        )
+        assert accepted is False
+        assert scores['non_human_classification'] == 'pashu'
+        assert 'Non-human per BPHS 4.10-4.11' in (scores.get('rejection_reason') or '')
+
+    def test_strict_orb_enforces_equality(self):
+        """Strict BPHS mode should reject even tiny Pranapada gaps beyond ~0.2° (1/10 palā)."""
+        lagna_deg = 0.0
+        pranapada_deg = 0.6  # Within same sign but beyond strict 0.5° tolerance
+        accepted, scores = btr_core.apply_bphs_hard_filters(
+            lagna_deg, pranapada_deg, 200.0, 200.0,
+            strict_bphs=True
+        )
+        assert scores['passes_trine_rule'] is True
+        assert scores['passes_padekyata'] is False
+        assert scores['passes_purification'] is False
+        assert accepted is False
 
 
 class TestGulikaBPHSCompliance:
@@ -392,4 +437,3 @@ class TestNishekaBPHSCompliance:
         assert 'gestation_score' in nisheka
         assert 0 <= nisheka['nisheka_lagna_deg'] < 360
         assert 0 < nisheka['gestation_months'] <= 12
-

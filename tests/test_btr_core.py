@@ -2,6 +2,7 @@
 
 """Tests for the BTR core module functions."""
 
+import inspect
 import pytest
 import datetime
 import math
@@ -294,7 +295,8 @@ class TestBPHSFilters:
         gulika_deg = 50.0
         moon_deg = 48.0
         accepted, scores = btr_core.apply_bphs_hard_filters(
-            lagna_deg, pranapada_deg, gulika_deg, moon_deg
+            lagna_deg, pranapada_deg, gulika_deg, moon_deg,
+            madhya_pranapada_deg=pranapada_deg
         )
         assert isinstance(accepted, bool)
         assert isinstance(scores, dict)
@@ -302,6 +304,7 @@ class TestBPHSFilters:
         assert 'gulika_alignment' in scores
         assert 'moon_alignment' in scores
         assert 'combined_verification' in scores
+        assert scores['passes_padekyata_madhya'] is True
     
     def test_trine_rule_same_sign(self):
         """Test trine rule with same sign (0th sign difference)."""
@@ -376,9 +379,57 @@ class TestBPHSFilters:
             assert scores['passes_trine_rule'] is False
             assert accepted is False  # Must be rejected
 
+    def test_non_trine_rejected_even_when_aligned(self):
+        """Candidates with perfect alignments but non-trine lagna must still be rejected."""
+        # Force strong verification scores via Gulika/Moon alignment, but keep Pranapada in non-trine.
+        lagna_deg = 10.0
+        pranapada_deg = 40.0  # Not a trine sign from lagna
+        gulika_deg = 10.0  # Perfect alignment to lagna
+        moon_deg = 10.0    # Perfect alignment to lagna
+        accepted, scores = btr_core.apply_bphs_hard_filters(
+            lagna_deg, pranapada_deg, gulika_deg, moon_deg
+        )
+        assert scores['passes_trine_rule'] is False
+        assert scores['passes_padekyata'] is False
+        assert accepted is False  # Trine rule remains the gatekeeper
+
+    def test_madhya_pranapada_must_match_when_supplied(self):
+        """Madhya and Sphuta Pranapada must both align when provided."""
+        lagna_deg = 15.0
+        sphuta_pranapada = 15.0
+        madhya_pranapada = 20.0  # Mismatch beyond padekyata tolerance
+        accepted, scores = btr_core.apply_bphs_hard_filters(
+            lagna_deg, sphuta_pranapada, gulika_deg=15.0, moon_deg=15.0,
+            madhya_pranapada_deg=madhya_pranapada
+        )
+        assert scores['passes_padekyata_sphuta'] is True
+        assert scores['passes_padekyata_madhya'] is False
+        assert accepted is False
+
+    def test_trine_but_no_purification_rejected(self):
+        """Trine alone is insufficient; BPHS 4.8 requires purification anchor."""
+        lagna_deg = 5.0
+        pranapada_deg = 25.0  # Same sign (trine satisfied) but 20° apart
+        # Set Gulika/Moon far away so combined verification stays zero with default orb
+        gulika_deg = 200.0
+        moon_deg = 200.0
+        accepted, scores = btr_core.apply_bphs_hard_filters(
+            lagna_deg, pranapada_deg, gulika_deg, moon_deg
+        )
+        assert scores['passes_trine_rule'] is True
+        assert scores['combined_verification'] == 0.0
+        assert scores['passes_purification'] is False
+        assert accepted is False
+
 
 class TestSearchCandidateTimes:
     """Tests for candidate time search."""
+
+    def test_default_step_uses_pala_granularity(self):
+        """Default search granularity should fall back to 1 palā (24s) steps."""
+        sig = inspect.signature(btr_core.search_candidate_times)
+        assert sig.parameters['step_minutes'].default is None
+        assert sig.parameters['step_palas'].default == 1.0
     
     def test_search_candidate_times(self):
         """Test searching candidate times."""
@@ -407,6 +458,7 @@ class TestSearchCandidateTimes:
             assert 'delta_pp_deg' in candidate
             assert 'passes_trine_rule' in candidate
             assert 'verification_scores' in candidate
+            assert 'bphs_score' in candidate
     
     def test_search_candidate_times_empty_range(self):
         """Test with a very small time range."""
@@ -426,6 +478,35 @@ class TestSearchCandidateTimes:
             step_minutes=10
         )
         assert isinstance(candidates, list)
+
+    def test_shodhana_adjusts_to_purification(self):
+        """Shodhana should use real ephemeris data to push candidates over the purification threshold."""
+        dob = datetime.date(2024, 1, 1)
+        latitude = 28.6139  # Delhi
+        longitude = 77.2090
+        tz_offset = 5.5
+
+        candidates = btr_core.search_candidate_times(
+            dob=dob,
+            latitude=latitude,
+            longitude=longitude,
+            tz_offset=tz_offset,
+            start_time_str="00:00",
+            end_time_str="23:59",
+            step_minutes=10,
+            strict_bphs=True,
+            enable_shodhana=True,
+            max_shodhana_palas=180
+        )
+
+        shodhana_candidates = [c for c in candidates if c.get('shodhana_delta_palas') is not None]
+
+        assert shodhana_candidates, "Expected at least one shodhana-adjusted candidate using real calculations"
+        closest_delta = min(abs(c['delta_pp_deg']) for c in shodhana_candidates)
+        assert closest_delta < 1.0
+        for candidate in shodhana_candidates:
+            assert candidate['passes_trine_rule'] is True
+            assert candidate['purification_anchor'] is not None
     
     def test_search_candidate_times_trine_rule_enforced(self):
         """Test that only candidates passing trine rule are returned."""
@@ -488,6 +569,11 @@ class TestSearchCandidateTimes:
         assert isinstance(candidates, list)
         # With 2-minute steps in 1 hour, should have many candidates
         # (though many may be filtered out by BPHS rules)
+
+    def test_default_ordering_uses_bphs_score(self):
+        """Default ordering should rely on BPHS score only."""
+        sig = inspect.signature(btr_core.search_candidate_times)
+        assert sig.parameters['bphs_only_ordering'].default is True
 
 
 class TestSpecialLagnas:
@@ -750,6 +836,28 @@ class TestPhysicalTraitsScoring:
         assert 'overall' in scores
         assert 0 <= scores['overall'] <= 100
 
+    def test_score_physical_traits_height_from_numeric(self):
+        """Numeric height and frame notes should derive bands."""
+        lagna_deg = 15.0  # Aries (large body)
+        planets = {
+            'sun': 120.0,
+            'moon': 180.0,
+            'mars': 60.0,
+            'mercury': 90.0,
+            'jupiter': 240.0,
+            'venus': 300.0,
+            'saturn': 30.0,
+            'rahu': 150.0,
+            'ketu': 330.0
+        }
+        traits = {
+            'height_cm': 178.0,  # Should map to TALL
+            'body_frame': 'athletic frame'
+        }
+        scores = btr_core.score_physical_traits(lagna_deg, planets, traits)
+        assert scores['height'] == 100.0
+        assert scores['build'] >= 50.0
+
 
 class TestLifeEventsVerification:
     """Tests for life events verification."""
@@ -852,7 +960,8 @@ class TestLifeEventsVerification:
         events = {
             'marriage': {'date': '2020-05-15'},
             'children': {'count': 1, 'dates': ['2021-08-20']},
-            'career': ['2018-06-01']
+            'career': ['2018-06-01'],
+            'major': [{'date': '2019-09-09', 'title': 'Relocation'}]
         }
         moon_longitude = 180.0
         scores = btr_core.verify_life_events(jd_ut_birth, lagna_deg, planets, events, moon_longitude)
@@ -860,8 +969,36 @@ class TestLifeEventsVerification:
         assert 'marriage' in scores
         assert 'children' in scores
         assert 'career' in scores
+        assert 'major' in scores
         assert 'overall' in scores
         assert 0 <= scores['overall'] <= 100
+
+    def test_verify_life_events_structured_lists(self):
+        """Structured list inputs should be parsed."""
+        jd_ut_birth = 2460320.5
+        lagna_deg = 45.0
+        planets = {
+            'sun': 120.0,
+            'moon': 180.0,
+            'mars': 60.0,
+            'mercury': 90.0,
+            'jupiter': 240.0,
+            'venus': 300.0,
+            'saturn': 30.0,
+            'rahu': 150.0,
+            'ketu': 330.0
+        }
+        events = {
+            'marriages': [{'date': '2025-01-01', 'place': 'Delhi'}],
+            'children': [{'date': '2026-06-01'}, {'date': '2028-12-12'}],
+            'career': [{'date': '2024-05-01', 'role': 'Promotion'}]
+        }
+        moon_longitude = 180.0
+        scores = btr_core.verify_life_events(jd_ut_birth, lagna_deg, planets, events, moon_longitude)
+        assert scores['marriage'] >= 0
+        assert scores['children'] >= 0
+        assert scores['career'] >= 0
+        assert scores['major'] >= 0
 
 
 class TestEnhancedScoring:
