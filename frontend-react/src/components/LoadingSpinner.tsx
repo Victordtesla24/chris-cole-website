@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { logClientEvent } from '../utils/clientLogger';
 import './LoadingSpinner.css';
 
 const phases = [
@@ -60,13 +61,36 @@ const phases = [
 
 export function LoadingSpinner() {
   const [currentPhase, setCurrentPhase] = useState(0);
+  const lastPhaseRef = useRef(0);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentPhase((prev) => (prev + 1) % phases.length);
+    let interval: ReturnType<typeof setInterval> | undefined;
+    logClientEvent('info', 'BTR loading spinner started', { phase: phases[0]?.num });
+    interval = setInterval(() => {
+      setCurrentPhase((prev) => {
+        const next = Math.min(prev + 1, phases.length - 1);
+        if (next === phases.length - 1 && interval) {
+          clearInterval(interval);
+        }
+        return next;
+      });
     }, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+      logClientEvent('info', 'BTR loading spinner stopped', { phase: phases[lastPhaseRef.current]?.num });
+    };
   }, []);
+
+  useEffect(() => {
+    lastPhaseRef.current = currentPhase;
+    const phase = phases[currentPhase];
+    logClientEvent('info', 'BTR loading phase update', {
+      phase: phase.num,
+      name: phase.name,
+    });
+  }, [currentPhase]);
 
   return (
     <div className="loading">
@@ -106,4 +130,3 @@ export function LoadingSpinner() {
     </div>
   );
 }
-

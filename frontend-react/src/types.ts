@@ -139,12 +139,27 @@ export interface RejectedCandidate {
   rejection_reason?: string | null;
 }
 
+export interface RejectionSummary {
+  reason_counts: Record<string, number>;
+  window?: { start?: string; end?: string };
+  nearest?: {
+    padekyata_delta_deg?: number | null;
+    moon_delta_deg?: number | null;
+    gulika_delta_deg?: number | null;
+  };
+  suggestions?: string[];
+  suggested_questions?: SuggestedQuestion[];
+  input_completeness_score?: number;
+  missing_categories?: string[];
+}
+
 export interface SearchConfig {
   step_minutes: number;
   time_window_used: {
     start_local: string;
     end_local: string;
   };
+  tz_offset_hours_used?: number;
 }
 
 export interface Geocode {
@@ -161,4 +176,20 @@ export interface BTRResponse {
   best_candidate: BTRCandidate | null;
   rejections?: RejectedCandidate[] | null;
   notes?: string | null;
+}
+
+export interface SuggestedQuestion {
+  field: string;
+  priority: number;
+  message: string;
+  hint?: string;
+}
+
+export interface NoCandidateErrorDetail {
+  code?: string;
+  message: string;
+  rejection_summary?: RejectionSummary;
+  search_window?: { start?: string; end?: string };
+  tz_offset_hours_used?: number;
+  suggested_questions?: SuggestedQuestion[];
 }

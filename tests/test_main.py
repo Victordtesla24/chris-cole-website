@@ -2,8 +2,13 @@
 
 """Tests for the FastAPI main module."""
 
+import datetime
+
 import pytest
 from fastapi.testclient import TestClient
+
+from backend import btr_core
+from backend import main as backend_main
 from backend.main import app
 
 
@@ -120,6 +125,148 @@ class TestAPIStructure:
         """Test that docs endpoint exists."""
         response = client.get("/docs")
         assert response.status_code == 200
+
+    def test_btr_prefers_geocoded_timezone(self, client, monkeypatch):
+        """Backend should default to geocoded timezone when user offset is absent/incorrect."""
+        async def fake_geocode(place: str, request_id=None):
+            return {
+                "lat": 1.0,
+                "lon": 2.0,
+                "formatted": "Test Place",
+                "tz_offset_hours": 9.5,
+                "timezone_name": "Asia/Test"
+            }
+
+        def fake_sunrise(dob, lat, lon, tz_offset):
+            assert tz_offset == 9.5
+            base = datetime.datetime(2024, 1, 15, 6, 0, 0)
+            return base, base.replace(hour=18)
+
+        def fake_gulika(dob, lat, lon, tz_offset):
+            assert tz_offset == 9.5
+            now = datetime.datetime(2024, 1, 15, 9, 0, 0)
+            return {
+                "day_gulika_deg": 0.0,
+                "night_gulika_deg": 180.0,
+                "day_gulika_time_local": now,
+                "night_gulika_time_local": now.replace(hour=21)
+            }
+
+        def fake_search(**kwargs):
+            assert kwargs["tz_offset"] == 9.5
+            return ([{
+                "time_local": "2024-01-15T10:00:00",
+                "lagna_deg": 10.0,
+                "pranapada_deg": 10.0,
+                "delta_pp_deg": 0.1,
+                "passes_trine_rule": True,
+                "verification_scores": {
+                    "degree_match": 100.0,
+                    "gulika_alignment": 80.0,
+                    "moon_alignment": 80.0,
+                    "combined_verification": 90.0,
+                    "passes_padekyata_sphuta": 1.0,
+                    "passes_padekyata_madhya": 1.0
+                },
+                "bphs_score": 95.0,
+                "special_lagnas": {
+                    "bhava_lagna": 0.0,
+                    "hora_lagna": 0.0,
+                    "ghati_lagna": 0.0,
+                    "varnada_lagna": 0.0
+                },
+                "nisheka": {
+                    "nisheka_lagna_deg": 0.0,
+                    "gestation_months": 8.0,
+                    "is_realistic": True,
+                    "gestation_score": 100.0
+                },
+                "composite_score": 95.0
+            }], [])
+
+        monkeypatch.setattr(backend_main, "opencage_geocode", fake_geocode)
+        monkeypatch.setattr(btr_core, "compute_sunrise_sunset", fake_sunrise)
+        monkeypatch.setattr(btr_core, "calculate_gulika", fake_gulika)
+        monkeypatch.setattr(btr_core, "search_candidate_times", lambda **kwargs: fake_search(**kwargs))
+
+        request_data = {
+            "dob": "2024-01-15",
+            "pob_text": "Test Place",
+            "tz_offset_hours": 0.0,  # intentionally wrong to test override
+            "approx_tob": {
+                "mode": "unknown",
+                "center": None,
+                "window_hours": None
+            }
+        }
+        response = client.post("/api/btr", json=request_data)
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["search_config"]["tz_offset_hours_used"] == 9.5
+        assert payload["geocode"]["formatted"] == "Test Place"
+
+    def test_btr_no_candidates_returns_summary(self, client, monkeypatch):
+        """404 responses should carry structured rejection summary for recovery UI."""
+        async def fake_geocode(place: str, request_id=None):
+            return {
+                "lat": 10.0,
+                "lon": 20.0,
+                "formatted": "Nowhere",
+                "tz_offset_hours": 5.5,
+                "timezone_name": "Asia/Test"
+            }
+
+        monkeypatch.setattr(backend_main, "opencage_geocode", fake_geocode)
+        monkeypatch.setattr(
+            btr_core,
+            "compute_sunrise_sunset",
+            lambda *args, **kwargs: (
+                datetime.datetime(2024, 1, 15, 6, 0, 0),
+                datetime.datetime(2024, 1, 15, 18, 0, 0)
+            )
+        )
+        monkeypatch.setattr(
+            btr_core,
+            "calculate_gulika",
+            lambda *args, **kwargs: {
+                "day_gulika_deg": 0.0,
+                "night_gulika_deg": 180.0,
+                "day_gulika_time_local": datetime.datetime(2024, 1, 15, 9, 0, 0),
+                "night_gulika_time_local": datetime.datetime(2024, 1, 15, 21, 0, 0)
+            }
+        )
+
+        def fake_search(**kwargs):
+            assert kwargs["tz_offset"] == 5.5
+            return [], [{
+                "time_local": "2024-01-15T00:00:00",
+                "lagna_deg": 0.0,
+                "pranapada_deg": 30.0,
+                "passes_trine_rule": False,
+                "passes_purification": False,
+                "rejection_reason": "Fails BPHS 4.6 padekyata"
+            }]
+
+        monkeypatch.setattr(btr_core, "search_candidate_times", lambda **kwargs: fake_search(**kwargs))
+
+        request_data = {
+            "dob": "2024-01-15",
+            "pob_text": "Nowhere",
+            "tz_offset_hours": 0.0,
+            "approx_tob": {
+                "mode": "unknown",
+                "center": None,
+                "window_hours": None
+            }
+        }
+
+        response = client.post("/api/btr", json=request_data)
+        assert response.status_code == 404
+        detail = response.json().get("detail")
+        assert detail["code"] == "NO_CANDIDATES"
+        summary = detail.get("rejection_summary") or {}
+        assert summary["reason_counts"]["Fails BPHS 4.6 padekyata"] == 1
+        assert detail["tz_offset_hours_used"] == 5.5
     
     def test_btr_with_time_range_override(self, client):
         """Test BTR endpoint with time range override."""

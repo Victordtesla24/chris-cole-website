@@ -147,6 +147,102 @@
 
   <div id="error-message" style="display: none;" class="error"></div>
 
+  <div id="recovery-panel" class="recovery-panel" style="display: none;">
+    <div class="recovery-header">
+      <div>
+        <h3>We need more detail to satisfy BPHS</h3>
+        <p class="recovery-subtitle">
+          No candidates passed the trine rule. Share more granular inputs below and retry — we will keep BPHS discipline intact and iterate until candidates appear.
+        </p>
+      </div>
+      <div class="recovery-status" id="recovery-status">Awaiting input</div>
+    </div>
+
+    <div class="recovery-summary">
+      <div class="summary-chip">
+        <span>DOB</span>
+        <strong id="recovery-dob">—</strong>
+      </div>
+      <div class="summary-chip">
+        <span>Location</span>
+        <strong id="recovery-location">—</strong>
+      </div>
+      <div class="summary-chip">
+        <span>Time Zone</span>
+        <strong id="recovery-tz">—</strong>
+      </div>
+      <div class="summary-chip">
+        <span>Current Window</span>
+        <strong id="recovery-window-used">—</strong>
+      </div>
+    </div>
+
+    <div class="recovery-step">
+      <div class="recovery-step-header">
+        <h4>1) Lock in the most likely part of the day</h4>
+        <span class="hint">Narrows the BPHS search window without relaxing rules</span>
+      </div>
+      <div class="pill-group" id="recovery-daypart">
+        <button type="button" data-start="04:00" data-end="10:00">Dawn · 04:00–10:00</button>
+        <button type="button" data-start="10:00" data-end="14:00">Midday · 10:00–14:00</button>
+        <button type="button" data-start="14:00" data-end="19:00">Evening · 14:00–19:00</button>
+        <button type="button" data-start="19:00" data-end="23:59">Late Night · 19:00–23:59</button>
+      </div>
+      <div class="compact-grid">
+        <label for="recovery-start">Custom start</label>
+        <input type="time" id="recovery-start">
+        <label for="recovery-end">Custom end</label>
+        <input type="time" id="recovery-end">
+      </div>
+    </div>
+
+    <div class="recovery-step">
+      <div class="recovery-step-header">
+        <h4>2) Add high-certainty life events (BPHS verification)</h4>
+        <span class="hint">Include at least 2 events if possible</span>
+      </div>
+      <div id="recovery-events-list" class="recovery-events"></div>
+      <button type="button" id="add-recovery-event" class="secondary-btn">+ Add life event</button>
+    </div>
+
+    <div class="recovery-step">
+      <div class="recovery-step-header">
+        <h4>3) Share physical traits (more granular)</h4>
+        <span class="hint">Used strictly for ranking — BPHS filters stay strict</span>
+      </div>
+      <div class="compact-grid">
+        <label for="recovery-height">Height</label>
+        <select id="recovery-height">
+          <option value="">Choose</option>
+          <option value="SHORT">Short</option>
+          <option value="MEDIUM">Medium</option>
+          <option value="TALL">Tall</option>
+        </select>
+        <label for="recovery-build">Build</label>
+        <select id="recovery-build">
+          <option value="">Choose</option>
+          <option value="SLIM">Slim</option>
+          <option value="ATHLETIC">Athletic</option>
+          <option value="HEAVY">Heavy</option>
+        </select>
+        <label for="recovery-complexion">Complexion</label>
+        <select id="recovery-complexion">
+          <option value="">Choose</option>
+          <option value="FAIR">Fair</option>
+          <option value="WHEATISH">Wheatish</option>
+          <option value="DARK">Dark</option>
+        </select>
+      </div>
+      <label for="recovery-notes">Anything very specific (marks, frame, complexion tone)?</label>
+      <textarea id="recovery-notes" rows="3" placeholder="Share precise descriptors for better scoring"></textarea>
+    </div>
+
+    <div class="recovery-actions">
+      <button type="button" id="retry-btr-btn">Retry BPHS search with these details</button>
+      <p class="recovery-helper">We will keep asking for specifics and re-running BPHS until candidates appear.</p>
+    </div>
+  </div>
+
   <div id="loading" style="display: none;" class="loading">
     <div class="spinner"></div>
     <p>Calculating BTR using BPHS methods...</p>

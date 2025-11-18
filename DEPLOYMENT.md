@@ -1,22 +1,15 @@
-# Deployment Guide – BPHS BTR Prototype
+# Deployment Notes
 
-## Prerequisites
-- Python 3.10+ (matches `runtime.txt`)
-- Node.js 18+ (for building the React frontend)
-- OpenCage API key for geocoding
-- **Build artefact required**: `frontend-react/dist` must exist before the backend process starts (the FastAPI app raises if the build is missing).
+This project runs a FastAPI backend with Swiss Ephemeris and a static frontend
+build served from `frontend-react/dist`. To deploy:
 
-## Environment Variables
-- `OPENCAGE_API_KEY` (required) – OpenCage Geocoding key.
-- `EPHE_PATH` (optional) – Custom Swiss Ephemeris data path.
-- `PORT` (platform provided) – Bind port for uvicorn/ASGI.
+1. Install dependencies from `requirements.txt` and ensure Swiss Ephemeris data
+   files are available at `EPHE_PATH` (environment variable).
+2. Build the React assets inside `frontend-react/` (`npm install && npm run build`)
+   so `frontend-react/dist` exists before starting the server.
+3. Launch the app with the provided `Procfile` entry (`web: uvicorn backend.main:app`).
 
-## Processes
-- Backend: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`
-- Frontend: Build with `npm run build` inside `frontend-react/`. Serve `frontend-react/dist` via your host or behind the backend static mount.
-
-## Files
-- `Procfile` – Declares gunicorn/uvicorn command.
-- `runtime.txt` – Python version pin.
-- `requirements.txt` – Backend dependencies.
-- `frontend-react/` – React app; run `npm run build`.
+For production, set `OPENCAGE_API_KEY`, `LOG_LEVEL`, and `EPHE_PATH` in the
+environment, and point logs to persistent storage if needed. Ensure time zone
+and location inputs remain accurate to stay aligned with Brihat Parashara Hora
+Shastra rules.

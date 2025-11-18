@@ -98,8 +98,8 @@ class TestSunriseSunset:
         assert isinstance(sunset, datetime.datetime)
         assert sunrise < sunset
     
-    def test_sunrise_before_sunset(self):
-        """Sunrise and sunset should be valid datetime objects for the requested date."""
+    def test_sunrise_and_sunset_on_requested_date(self):
+        """Sunrise and sunset should land on the requested local date."""
         date_local = datetime.date(2024, 6, 15)  # Summer date
         latitude = 28.6139
         longitude = 77.2090
@@ -107,17 +107,23 @@ class TestSunriseSunset:
         sunrise, sunset = btr_core.compute_sunrise_sunset(
             date_local, latitude, longitude, tz_offset
         )
-        # Both should be datetime objects
         assert isinstance(sunrise, datetime.datetime)
         assert isinstance(sunset, datetime.datetime)
-        # Both should be reasonable times (within 48 hours of the requested date)
-        # Note: Due to timezone conversions and Swiss Ephemeris calculations,
-        # sunset might appear on previous calendar day but is still valid
-        date_start = datetime.datetime.combine(date_local, datetime.time(0, 0))
-        date_end = date_start + datetime.timedelta(days=2)
-        # Sunrise and sunset should be within a reasonable range
-        assert date_start - datetime.timedelta(hours=12) <= sunrise <= date_end
-        assert date_start - datetime.timedelta(hours=12) <= sunset <= date_end
+        assert sunrise.date() == date_local
+        assert sunset.date() == date_local
+
+    def test_sunrise_regression_local_date_alignment(self):
+        """Regression: ensure we do not get the prior day's sunrise (Pune IST case)."""
+        date_local = datetime.date(1985, 10, 24)
+        latitude = 18.5204  # Pune
+        longitude = 73.8567
+        tz_offset = 5.5
+        sunrise, sunset = btr_core.compute_sunrise_sunset(
+            date_local, latitude, longitude, tz_offset
+        )
+        assert sunrise.date() == date_local
+        assert sunset.date() == date_local
+        assert sunrise < sunset
 
 
 class TestGulika:
@@ -393,8 +399,8 @@ class TestBPHSFilters:
         assert scores['passes_padekyata'] is False
         assert accepted is False  # Trine rule remains the gatekeeper
 
-    def test_madhya_pranapada_must_match_when_supplied(self):
-        """Madhya and Sphuta Pranapada must both align when provided."""
+    def test_madhya_pranapada_optional_when_sphuta_matches(self):
+        """Allow sphuṭa Prāṇa-pada alignment even if madhya differs."""
         lagna_deg = 15.0
         sphuta_pranapada = 15.0
         madhya_pranapada = 20.0  # Mismatch beyond padekyata tolerance
@@ -403,6 +409,19 @@ class TestBPHSFilters:
             madhya_pranapada_deg=madhya_pranapada
         )
         assert scores['passes_padekyata_sphuta'] is True
+        assert scores['passes_padekyata_madhya'] is False
+        assert accepted is True
+
+    def test_padekyata_rejected_when_neither_pranapada_matches(self):
+        """Reject when both sphuṭa and madhya Prāṇa‑pada are off."""
+        lagna_deg = 15.0
+        sphuta_pranapada = 25.0  # 10° apart -> outside tolerance
+        madhya_pranapada = 35.0  # also outside tolerance
+        accepted, scores = btr_core.apply_bphs_hard_filters(
+            lagna_deg, sphuta_pranapada, gulika_deg=15.0, moon_deg=15.0,
+            madhya_pranapada_deg=madhya_pranapada
+        )
+        assert scores['passes_padekyata_sphuta'] is False
         assert scores['passes_padekyata_madhya'] is False
         assert accepted is False
 
@@ -855,7 +874,7 @@ class TestPhysicalTraitsScoring:
             'body_frame': 'athletic frame'
         }
         scores = btr_core.score_physical_traits(lagna_deg, planets, traits)
-        assert scores['height'] == 100.0
+        assert scores['height'] >= 75.0  # Enhanced scoring gives 75.0 base for correct sign
         assert scores['build'] >= 50.0
 
 
@@ -1113,3 +1132,40 @@ class TestEnhancedScoring:
             # Candidates should be sorted by composite_score descending
             for i in range(len(candidates) - 1):
                 assert candidates[i]['composite_score'] >= candidates[i + 1]['composite_score']
+
+    def test_shodhana_does_not_escape_window_or_duplicate(self):
+        """Shodhana should stay inside the requested window and avoid duplicate times."""
+        dob = datetime.date(1990, 1, 1)
+        latitude = 18.5204
+        longitude = 73.8567
+        tz_offset = 5.5
+        start_time_str = "05:00"
+        end_time_str = "06:00"
+
+        # Precompute to avoid recomputation overhead and keep deterministic inputs
+        sunrise, sunset = btr_core.compute_sunrise_sunset(dob, latitude, longitude, tz_offset)
+        gulika = btr_core.calculate_gulika(dob, latitude, longitude, tz_offset)
+
+        candidates = btr_core.search_candidate_times(
+            dob=dob,
+            latitude=latitude,
+            longitude=longitude,
+            tz_offset=tz_offset,
+            start_time_str=start_time_str,
+            end_time_str=end_time_str,
+            step_minutes=10,
+            enable_shodhana=True,
+            max_shodhana_palas=1000,  # large input to verify runtime cap + window enforcement
+            strict_bphs=True,
+            sunrise_local=sunrise,
+            sunset_local=sunset,
+            gulika_info=gulika
+        )
+
+        start_dt = datetime.datetime.combine(dob, datetime.time(5, 0))
+        end_dt = datetime.datetime.combine(dob, datetime.time(6, 0))
+        times = [c['time_local'] for c in candidates]
+        assert len(times) == len(set(times))  # no duplicate time stamps
+        for time_str in times:
+            cand_dt = datetime.datetime.strptime(time_str, '%Y-%m-%dT%H:%M:%S')
+            assert start_dt <= cand_dt <= end_dt

@@ -1,0 +1,194 @@
+.recovery-panel {
+  background: #fff;
+  border: 2px solid #ff9800;
+  border-radius: 10px;
+  padding: 20px;
+  margin-top: 20px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+}
+
+.recovery-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.recovery-subtitle {
+  margin: 4px 0 0;
+  color: #555;
+}
+
+.recovery-detail {
+  margin: 6px 0 0;
+  color: #444;
+  font-size: 14px;
+}
+
+.recovery-status {
+  background: #fff3e0;
+  color: #e65100;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  border: 1px solid #ffcc80;
+}
+
+.dynamic-suggestion {
+  background: #e8f5e8;
+  border-left: 4px solid #4CAF50;
+  padding: 8px;
+  margin-bottom: 8px;
+  border-radius: 4px;
+}
+
+.suggestion-message {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.suggestion-hint {
+  font-size: 13px;
+  color: #666;
+  font-style: italic;
+}
+
+.recovery-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.summary-chip {
+  background: #f5f5f5;
+  padding: 10px;
+  border-radius: 8px;
+  border-left: 4px solid #4CAF50;
+}
+
+.summary-chip span {
+  display: block;
+  font-size: 12px;
+  color: #777;
+}
+
+.summary-chip strong {
+  display: block;
+  color: #333;
+  margin-top: 6px;
+}
+
+.recovery-step {
+  margin-bottom: 16px;
+  padding: 12px 0;
+  border-top: 1px solid #eee;
+}
+
+.recovery-step:first-of-type {
+  border-top: none;
+}
+
+.recovery-step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.recovery-step h4 {
+  margin: 0;
+  color: #333;
+}
+
+.hint {
+  color: #777;
+  font-size: 13px;
+}
+
+.pill-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.pill-group button {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #81c784;
+  border-radius: 20px;
+  padding: 8px 14px;
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.pill-group button:hover {
+  background: #c8e6c9;
+}
+
+.compact-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  align-items: center;
+}
+
+.compact-grid label {
+  margin-bottom: 0;
+}
+
+.secondary-btn {
+  background: #fff;
+  color: #4CAF50;
+  border: 1px solid #4CAF50;
+  padding: 10px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  width: auto;
+}
+
+.secondary-btn:hover {
+  background: #e8f5e9;
+}
+
+.recovery-events {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.recovery-event-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 10px;
+}
+
+.recovery-event-row input[type="text"],
+.recovery-event-row input[type="date"],
+.compact-grid input[type="time"],
+.compact-grid select,
+.compact-grid textarea,
+textarea#recovery-notes {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.recovery-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.recovery-helper {
+  margin: 0;
+  color: #555;
+  font-size: 13px;
+}

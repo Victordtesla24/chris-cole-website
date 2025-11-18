@@ -14,6 +14,10 @@ This module exposes two endpoints:
 """
 
 import os
+import sys
+import uuid
+import time
+import logging
 import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -28,6 +32,50 @@ import httpx
 
 from . import config
 from . import btr_core
+
+# ----------------------------------------------------------------------------
+# Logging configuration
+# ----------------------------------------------------------------------------
+
+def _configure_logger() -> logging.Logger:
+    """Configure a verbose application logger that always flushes to stdout."""
+    level_name = (config.LOG_LEVEL or "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logger = logging.getLogger("btr")
+    if not logger.handlers:
+        formatter = logging.Formatter("%(asctime)s | %(levelname)s | %(name)s | %(message)s")
+
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
+        # Mirror all backend logs into logs/backend.log so they are always captured
+        logs_dir = Path(__file__).parent.parent / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(logs_dir / "backend.log", encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        # Attach the same file handler to uvicorn loggers so server events persist even without shell redirection
+        for uvicorn_logger_name in ("uvicorn.error", "uvicorn.access"):
+            uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+            uvicorn_logger.setLevel(level)
+            if not any(isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == str(logs_dir / "backend.log") for h in uvicorn_logger.handlers):
+                uvicorn_logger.addHandler(file_handler)
+            uvicorn_logger.propagate = False
+    logger.setLevel(level)
+    logger.propagate = False
+    # Keep uvicorn logs aligned with the app for consistency
+    logging.getLogger("uvicorn.error").setLevel(level)
+    logging.getLogger("uvicorn.access").setLevel(level)
+    return logger
+
+logger = _configure_logger()
+
+def _log_phase(request_id: str, phase: int, title: str, detail: str, context: Optional[Dict[str, Any]] = None):
+    """Emit a structured phase log with an optional context payload."""
+    suffix = f" | context={context}" if context else ""
+    logger.info("[req:%s] Phase %d - %s: %s%s", request_id, phase, title, detail, suffix)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -211,6 +259,12 @@ class BTRResponse(BaseModel):
     rejections: Optional[List[RejectedCandidate]] = None
     notes: Optional[str] = None
 
+class ClientLogEvent(BaseModel):
+    """Payload for frontend/client log forwarding."""
+    level: str = Field("info", description="Log level e.g. debug/info/warning/error")
+    message: str = Field(..., description="Message emitted by the frontend")
+    context: Optional[Dict[str, Any]] = Field(default=None, description="Optional structured context from the client")
+
 # ---------------------------------------------------------------------------
 # Utility functions
 # ---------------------------------------------------------------------------
@@ -254,37 +308,232 @@ def _normalize_events_for_scoring(events: Optional[LifeEventsModel]) -> Optional
     data = events.model_dump(exclude_none=True)
     return data or None
 
-async def opencage_geocode(place: str) -> Dict[str, Any]:
+def _analyze_input_completeness(request: BTRRequest) -> Dict[str, Any]:
+    """Analyze input completeness and return prioritized suggested questions.
+    
+    Returns suggestions based on what fields are missing from the request,
+    with priorities determined by the potential impact on candidate scoring.
+    """
+    suggestions = []
+    priority = 1
+    
+    # Check if user has any time constraint (high impact on search effectiveness)
+    has_time_constraint = bool(request.time_range_override or (
+        request.approx_tob.mode == 'approx' and request.approx_tob.center
+    ))
+    is_full_day_default = (request.approx_tob.mode == 'unknown' and 
+                          not request.time_range_override)
+    
+    if is_full_day_default:
+        suggestions.append({
+            "field": "time_range",
+            "priority": priority,
+            "message": "Add a time range to narrow the search window",
+            "hint": "Specify the most likely time period (e.g., morning, afternoon, evening) to improve candidate quality"
+        })
+        priority += 1
+    
+    # Check for life events (important for verification)
+    events = request.optional_events
+    has_major_events = bool(events and events.major and len(events.major) > 0)
+    has_marriage = bool(events and (events.marriage or (events.marriages and len(events.marriages) > 0)))
+    has_children = bool(events and events.children and len(events.children) > 0)
+    has_career = bool(events and events.career and len(events.career) > 0)
+    
+    if not (has_major_events or has_marriage or has_children or has_career):
+        suggestions.append({
+            "field": "life_events",
+            "priority": priority,
+            "message": "Add at least 2 significant life events",
+            "hint": "Include dates for marriage, children's birth, career changes, or other major life events"
+        })
+        priority += 1
+    elif has_major_events and len(events.major) < 2:
+        suggestions.append({
+            "field": "more_life_events",
+            "priority": priority,
+            "message": "Add more life events for better verification",
+            "hint": "Additional events help confirm the birth time through BPHS verification methods"
+        })
+        priority += 1
+    
+    # Check for physical traits (helps with ranking and verification)
+    traits = request.optional_traits
+    has_physical_info = bool(traits and (
+        traits.height_band or traits.height_cm or traits.height_feet or
+        traits.build_band or traits.body_frame or
+        traits.complexion_tone or traits.complexion or
+        traits.notes
+    ))
+    
+    if not has_physical_info:
+        suggestions.append({
+            "field": "physical_traits",
+            "priority": priority,
+            "message": "Add physical traits for better candidate ranking",
+            "hint": "Height, build, complexion, or distinctive features help verify the most suitable birth time"
+        })
+        priority += 1
+    
+    # Enhanced time range analysis
+    if has_time_constraint and not is_full_day_default:
+        # Check if time range is too narrow (less than 2 hours)
+        time_window_hours = 24  # default
+        if request.time_range_override:
+            try:
+                start_time = datetime.datetime.strptime(request.time_range_override.start, "%H:%M")
+                end_time = datetime.datetime.strptime(request.time_range_override.end, "%H:%M")
+                if end_time <= start_time:
+                    end_time += datetime.timedelta(days=1)
+                time_window_hours = (end_time - start_time).total_seconds() / 3600
+            except ValueError:
+                pass
+        elif request.approx_tob.mode == 'approx' and request.approx_tob.window_hours:
+            time_window_hours = request.approx_tob.window_hours
+        
+        if time_window_hours < 2:
+            suggestions.append({
+                "field": "widen_time_range",
+                "priority": priority,
+                "message": "Time range is very narrow - consider widening it",
+                "hint": f"Current window is {time_window_hours:.1f} hours. Try at least 4-6 hours for better BPHS matching"
+            })
+            priority += 1
+        else:
+            suggestions.append({
+                "field": "verify_time_range",
+                "priority": priority,
+                "message": "Verify the time range accuracy or add more context",
+                "hint": "Consider if the birth time could be outside this range, or add physical traits to improve filtering"
+            })
+            priority += 1
+    
+    # Prioritize physical traits when time range is provided but still no candidates
+    if has_time_constraint and not has_physical_info:
+        # Move physical traits suggestion up in priority when time range exists
+        suggestions.insert(0, {
+            "field": "physical_traits_time_range",
+            "priority": 1,
+            "message": "Add physical traits to filter candidates in your time range",
+            "hint": "Since you provided a time range, physical traits will help identify the best candidate within that window"
+        })
+        # Re-number priorities for remaining suggestions
+        for i, suggestion in enumerate(suggestions):
+            if suggestion["field"] != "physical_traits_time_range":
+                suggestion["priority"] = i + 2
+    
+    return {
+        "suggested_questions": suggestions,
+        "input_completeness_score": 100 - (len(suggestions) * 20),  # Simple scoring
+        "missing_categories": [s["field"] for s in suggestions]
+    }
+
+def _summarize_rejections_for_response(
+    rejections: list[Dict[str, Any]],
+    window_start: str,
+    window_end: str,
+    request: BTRRequest,
+    suggested_questions: Dict[str, Any] = None
+) -> tuple[Dict[str, Any], str]:
+    """Summarize rejection diagnostics for UI recovery flows."""
+    # If no suggested questions provided, analyze input completeness
+    if suggested_questions is None:
+        suggested_questions = _analyze_input_completeness(request)
+    
+    reason_counts: Dict[str, int] = {}
+    min_padekyata = None
+    min_moon = None
+    min_gulika = None
+    for rej in rejections:
+        reason = rej.get("rejection_reason") or "Unknown rejection"
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        dp = rej.get("delta_pp_deg")
+        dm = rej.get("delta_moon_deg")
+        dg = rej.get("delta_gulika_deg")
+        if dp is not None:
+            min_padekyata = dp if min_padekyata is None else min(min_padekyata, dp)
+        if dm is not None:
+            min_moon = dm if min_moon is None else min(min_moon, dm)
+        if dg is not None:
+            min_gulika = dg if min_gulika is None else min(min_gulika, dg)
+    
+    top_reasons = sorted(reason_counts.items(), key=lambda kv: kv[1], reverse=True)
+    reason_str = "; ".join(f"{msg} ({count})" for msg, count in top_reasons[:3])
+    delta_bits = []
+    if min_padekyata is not None:
+        delta_bits.append(f"closest padekyata Δ={min_padekyata:.2f}°")
+    if min_moon is not None:
+        delta_bits.append(f"closest Moon Δ={min_moon:.2f}°")
+    if min_gulika is not None:
+        delta_bits.append(f"closest Gulika Δ={min_gulika:.2f}°")
+    delta_str = "; ".join(delta_bits)
+
+    # Enhanced rejection summary with dynamic suggested questions
+    rejection_summary = {
+        "reason_counts": reason_counts,
+        "window": {"start": window_start, "end": window_end},
+        "nearest": {
+            "padekyata_delta_deg": min_padekyata,
+            "moon_delta_deg": min_moon,
+            "gulika_delta_deg": min_gulika
+        },
+        "suggested_questions": suggested_questions.get("suggested_questions", []),
+        "input_completeness_score": suggested_questions.get("input_completeness_score", 0),
+        "missing_categories": suggested_questions.get("missing_categories", []),
+        "suggestions": [
+            "Confirm the location and ensure the time zone matches the geocoded offset.",
+            "Provide at least two dated life events (marriage, child, career, or major events).",
+            "Narrow or widen the search window based on your certainty of the birth time."
+        ]
+    }
+
+    human_detail_suffix = ""
+    if reason_str:
+        human_detail_suffix += f" Rejections: {reason_str}."
+    if delta_str:
+        human_detail_suffix += f" Nearest matches: {delta_str}."
+    return rejection_summary, human_detail_suffix
+
+async def opencage_geocode(place: str, request_id: Optional[str] = None) -> Dict[str, Any]:
     """Resolve a place name using the OpenCage API.
 
     Args:
         place: Free‑text place description.
+        request_id: Optional correlation id for log tracing.
 
     Returns:
         Dict with keys 'lat', 'lon', 'formatted', and optional timezone info.
     """
+    log_prefix = f"[req:{request_id}] " if request_id else ""
     api_key = config.OPENCAGE_API_KEY
     if not api_key:
+        logger.error("%sOpenCage API key is not configured; cannot geocode '%s'", log_prefix, place)
         raise HTTPException(status_code=500, detail="OPENCAGE_API_KEY is not configured.")
+    logger.info("%sGeocoding place '%s'", log_prefix, place)
     url = "https://api.opencagedata.com/geocode/v1/json"
     params = {'q': place, 'key': api_key, 'limit': 1}
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.get(url, params=params, timeout=10.0)
         except httpx.TimeoutException:
+            logger.warning("%sOpenCage API timed out for '%s'", log_prefix, place)
             raise HTTPException(status_code=504, detail="OpenCage API request timed out.")
         except httpx.RequestError as e:
+            logger.error("%sOpenCage API request error for '%s': %s", log_prefix, place, e)
             raise HTTPException(status_code=503, detail=f"OpenCage API request failed: {str(e)}")
         
         if resp.status_code != 200:
+            logger.error("%sOpenCage API error (%s): %s", log_prefix, resp.status_code, resp.text[:200])
             raise HTTPException(status_code=resp.status_code, detail=f"OpenCage API error: {resp.text}")
         
         try:
             data = resp.json()
         except ValueError as e:
+            logger.error("%sInvalid JSON from OpenCage: %s", log_prefix, e)
             raise HTTPException(status_code=502, detail=f"Invalid JSON response from OpenCage API: {str(e)}")
         
         if not data.get('results'):
+            logger.warning("%sOpenCage returned no results for '%s'", log_prefix, place)
             raise HTTPException(status_code=404, detail="Location not found.")
         
         result = data['results'][0]
@@ -302,42 +551,91 @@ async def opencage_geocode(place: str) -> Dict[str, Any]:
                 tz_offset_hours = None
             tz_name = tz_data.get('name')
         except (KeyError, ValueError, TypeError) as e:
+            logger.error("%sOpenCage response parse failed: %s", log_prefix, e)
             raise HTTPException(status_code=502, detail=f"Invalid response format from OpenCage API: {str(e)}")
         
-        return {
+        payload = {
             'lat': lat,
             'lon': lon,
             'formatted': formatted,
             'tz_offset_hours': tz_offset_hours,
             'timezone_name': tz_name
         }
+        logger.info(
+            "%sGeocoding success | lat=%s lon=%s place='%s' tz_offset=%s tz_name=%s",
+            log_prefix,
+            lat,
+            lon,
+            formatted,
+            tz_offset_hours,
+            tz_name
+        )
+        return payload
 
 # ---------------------------------------------------------------------------
 # API endpoints
 # ---------------------------------------------------------------------------
 
+@app.post("/api/client-log")
+async def client_log(event: ClientLogEvent):
+    """Accept client-side log events and forward them to backend logs."""
+    level = getattr(logging, event.level.upper(), logging.INFO)
+    logger.log(level, "[client] %s | context=%s", event.message, event.context or {})
+    return {"status": "ok"}
+
 @app.get("/api/geocode")
 async def geocode(q: str = Query(..., description="Place name to geocode")):
     """Geocode a place using OpenCage."""
-    geodata = await opencage_geocode(q)
+    request_id = uuid.uuid4().hex[:8]
+    _log_phase(request_id, 0, "Geocode", "Incoming geocode request", {"query": q})
+    geodata = await opencage_geocode(q, request_id=request_id)
+    _log_phase(request_id, 1, "Geocode", "Geocode success", {"lat": geodata.get("lat"), "lon": geodata.get("lon")})
     return geodata
 
 @app.post("/api/btr", response_model=BTRResponse)
 async def btr(request: BTRRequest):
     """Perform BPHS-based birth time rectification."""
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"Received BTR request: dob={request.dob}, pob={request.pob_text}, tz={request.tz_offset_hours}, mode={request.approx_tob.mode}")
+    request_id = uuid.uuid4().hex[:8]
+    t0 = time.perf_counter()
+    _log_phase(
+        request_id,
+        0,
+        "Request received",
+        "Starting BTR calculation",
+        {
+            "dob": request.dob,
+            "pob_text": request.pob_text,
+            "tz": request.tz_offset_hours,
+            "mode": request.approx_tob.mode
+        }
+    )
     # Parse date of birth
     try:
         dob_date = datetime.datetime.strptime(request.dob, "%Y-%m-%d").date()
     except ValueError:
+        logger.exception("[req:%s] Invalid dob format", request_id)
         raise HTTPException(status_code=400, detail="Invalid date format for dob. Use YYYY-MM-DD.")
 
     # Geocode the place
-    geocode_result = await opencage_geocode(request.pob_text)
+    _log_phase(request_id, 1, "Geocode", "Requesting geocode from OpenCage")
+    geocode_result = await opencage_geocode(request.pob_text, request_id=request_id)
     latitude = geocode_result['lat']
     longitude = geocode_result['lon']
+    geocode_tz_offset = geocode_result.get('tz_offset_hours')
+    tz_offset_hours_to_use = geocode_tz_offset if isinstance(geocode_tz_offset, (int, float)) else request.tz_offset_hours
+    _log_phase(
+        request_id,
+        2,
+        "Geocode complete",
+        "Resolved place and timezone",
+        {
+            "lat": latitude,
+            "lon": longitude,
+            "formatted": geocode_result.get('formatted'),
+            "tz_offset_hours": tz_offset_hours_to_use,
+            "tz_name": geocode_result.get('timezone_name')
+        }
+    )
 
     # Determine search window
     if request.time_range_override:
@@ -363,58 +661,171 @@ async def btr(request: BTRRequest):
             end_dt = datetime.datetime.combine(dob_date, datetime.time(center_hour, center_min)) + datetime.timedelta(hours=window)
             start_time = start_dt.strftime("%H:%M")
             end_time = end_dt.strftime("%H:%M")
+    _log_phase(
+        request_id,
+        3,
+        "Search window set",
+        "Finalized time window for candidate scan",
+        {"start_time": start_time, "end_time": end_time, "tz_offset_hours": tz_offset_hours_to_use}
+    )
 
     # Precompute sunrise/sunset and gulika
     try:
-        sunrise_local, sunset_local = btr_core.compute_sunrise_sunset(dob_date, latitude, longitude, request.tz_offset_hours)
+        sunrise_local, sunset_local = btr_core.compute_sunrise_sunset(dob_date, latitude, longitude, tz_offset_hours_to_use)
     except RuntimeError as e:
+        logger.exception("[req:%s] Sunrise/sunset calculation failed: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to calculate sunrise/sunset: {str(e)}")
     except Exception as e:
+        logger.exception("[req:%s] Unexpected sunrise/sunset error: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Unexpected error in sunrise/sunset calculation: {str(e)}")
     
+    _log_phase(
+        request_id,
+        4,
+        "Sunrise/Sunset computed",
+        "Day boundary established",
+        {
+            "sunrise_local": sunrise_local.isoformat(),
+            "sunset_local": sunset_local.isoformat()
+        }
+    )
+    
     try:
-        gulika_info = btr_core.calculate_gulika(dob_date, latitude, longitude, request.tz_offset_hours)
+        gulika_info = btr_core.calculate_gulika(dob_date, latitude, longitude, tz_offset_hours_to_use)
     except RuntimeError as e:
+        logger.exception("[req:%s] Gulika calculation failed: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to calculate Gulika: {str(e)}")
     except Exception as e:
+        logger.exception("[req:%s] Unexpected Gulika error: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Unexpected error in Gulika calculation: {str(e)}")
+    _log_phase(request_id, 5, "Gulika calculated", "Primary purification marker ready", gulika_info)
 
     traits_for_scoring = _normalize_traits_for_scoring(request.optional_traits)
     events_for_scoring = _normalize_events_for_scoring(request.optional_events)
+    logger.debug(
+        "[req:%s] Traits normalized: %s | Events normalized: %s",
+        request_id,
+        bool(traits_for_scoring),
+        bool(events_for_scoring)
+    )
 
     # Search candidate times at BPHS-aligned resolution (2 minutes)
     step_minutes = 2
+    search_attempts: List[Dict[str, Any]] = []
+    strict_bphs_used = True
+    _log_phase(
+        request_id,
+        6,
+        "Candidate search start",
+        "Scanning times at BPHS resolution",
+        {
+            "step_minutes": step_minutes,
+            "strict_bphs": True,
+            "enable_shodhana": True,
+            "collect_rejections": True
+        }
+    )
     try:
-        candidates, rejections = btr_core.search_candidate_times(
-            dob=dob_date,
-            latitude=latitude,
-            longitude=longitude,
-            tz_offset=request.tz_offset_hours,
-            start_time_str=start_time,
-            end_time_str=end_time,
-            step_minutes=step_minutes,
-            strict_bphs=True,
-            enable_shodhana=True,
-            bphs_only_ordering=True,
-            collect_rejections=True,
-            sunrise_local=sunrise_local,
-            sunset_local=sunset_local,
-            gulika_info=gulika_info,
-            optional_traits=traits_for_scoring,
-            optional_events=events_for_scoring
-        )
+        def _run_search(window_start: str, window_end: str, strict_bphs: bool = True):
+            return btr_core.search_candidate_times(
+                dob=dob_date,
+                latitude=latitude,
+                longitude=longitude,
+                tz_offset=tz_offset_hours_to_use,
+                start_time_str=window_start,
+                end_time_str=window_end,
+                step_minutes=step_minutes,
+                strict_bphs=strict_bphs,
+                enable_shodhana=True,
+                bphs_only_ordering=True,
+                collect_rejections=True,
+                sunrise_local=sunrise_local,
+                sunset_local=sunset_local,
+                gulika_info=gulika_info,
+                optional_traits=traits_for_scoring,
+                optional_events=events_for_scoring
+            )
+
+        candidates, rejections = _run_search(start_time, end_time, strict_bphs=True)
+        search_attempts = [{
+            "window": {"start": start_time, "end": end_time},
+            "strict_bphs": True,
+            "candidates": len(candidates),
+            "rejections": len(rejections)
+        }]
+
+        # Fallback 1: widen to full-day window if user narrowed the search
+        if not candidates and (start_time != "00:00" or end_time != "23:59"):
+            _log_phase(
+                request_id,
+                6,
+                "Fallback search",
+                "No candidates found; widening to full-day window",
+                {"previous_window": {"start": start_time, "end": end_time}}
+            )
+            fallback_start, fallback_end = "00:00", "23:59"
+            candidates, rejections = _run_search(fallback_start, fallback_end, strict_bphs=True)
+            search_attempts.append({
+                "window": {"start": fallback_start, "end": fallback_end},
+                "strict_bphs": True,
+                "candidates": len(candidates),
+                "rejections": len(rejections),
+                "note": "expanded_window_full_day"
+            })
+            if candidates:
+                start_time, end_time = fallback_start, fallback_end
+                strict_bphs_used = True
+
+        # Fallback 2: relax palā tolerance (strict_bphs=False) while keeping BPHS trine rule intact
+        if not candidates:
+            _log_phase(
+                request_id,
+                6,
+                "Fallback search",
+                "No candidates after widening; retrying with relaxed palā tolerance",
+                {"window": {"start": start_time, "end": end_time}}
+            )
+            candidates, rejections = _run_search(start_time, end_time, strict_bphs=False)
+            search_attempts.append({
+                "window": {"start": start_time, "end": end_time},
+                "strict_bphs": False,
+                "candidates": len(candidates),
+                "rejections": len(rejections),
+                "note": "relaxed_padekyata_tolerance"
+            })
+            if candidates:
+                strict_bphs_used = False
     except RuntimeError as e:
+        logger.exception("[req:%s] BTR candidate search failed: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to search candidate times: {str(e)}")
     except Exception as e:
+        logger.exception("[req:%s] Unexpected error in candidate search: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Unexpected error in candidate search: {str(e)}")
 
     # Candidates are already sorted by composite_score in search_candidate_times
     if not candidates:
+        rejection_summary, human_suffix = _summarize_rejections_for_response(rejections, start_time, end_time, request)
+        _log_phase(
+            request_id,
+            7,
+            "No candidates",
+            "Candidate search yielded zero valid times",
+            {"window_start": start_time, "window_end": end_time, "rejections": len(rejections)}
+        )
         raise HTTPException(
             status_code=404,
-            detail="No valid birth time candidates found. This may indicate: "
-                   "1) No times in the search window satisfy BPHS trine rule (4.10), "
-                   "2) Invalid date/location, or 3) Calculation error."
+            detail={
+                "code": "NO_CANDIDATES",
+                "message": "No valid birth time candidates found. This may indicate: "
+                           "1) No times in the search window satisfy BPHS trine rule (4.10), "
+                           "2) Invalid date/location, or 3) Calculation error."
+                           f"{human_suffix}",
+                "rejection_summary": rejection_summary,
+                "search_window": {"start": start_time, "end": end_time},
+                "tz_offset_hours_used": tz_offset_hours_to_use,
+                "suggested_questions": rejection_summary.get("suggested_questions", []),
+                "fallback_trace": search_attempts
+            }
         )
     
     # Convert to Pydantic models, handling optional fields
@@ -444,6 +855,7 @@ async def btr(request: BTRRequest):
                 candidate_dict['life_events_scores'] = LifeEventsScore(**c['life_events_scores'])
             candidate_models.append(BTRCandidate(**candidate_dict))
         except (KeyError, ValueError, TypeError) as e:
+            logger.exception("[req:%s] Candidate parse failed: %s", request_id, e)
             raise HTTPException(
                 status_code=500,
                 detail=f"Invalid candidate data structure: {str(e)}"
@@ -454,12 +866,24 @@ async def btr(request: BTRRequest):
         try:
             rejection_models.append(RejectedCandidate(**r))
         except (KeyError, ValueError, TypeError) as e:
+            logger.exception("[req:%s] Rejection parse failed: %s", request_id, e)
             raise HTTPException(
                 status_code=500,
                 detail=f"Invalid rejection data structure: {str(e)}"
             )
     
     best_candidate = candidate_models[0] if candidate_models else None
+    _log_phase(
+        request_id,
+        7,
+        "Candidates ranked",
+        "Scoring complete",
+        {
+            "candidate_count": len(candidate_models),
+            "rejection_count": len(rejection_models),
+            "best_candidate": best_candidate.time_local if best_candidate else None
+        }
+    )
 
     # Generate BPHS methodology notes
     methodology_notes = (
@@ -487,11 +911,27 @@ async def btr(request: BTRRequest):
             "time_window_used": {
                 "start_local": start_time,
                 "end_local": end_time
-            }
+            },
+            "tz_offset_hours_used": tz_offset_hours_to_use
         },
         candidates=candidate_models,
         best_candidate=best_candidate,
         rejections=rejection_models or None,
         notes=methodology_notes
     )
+    total_elapsed = time.perf_counter() - t0
+    _log_phase(
+        request_id,
+        8,
+        "Response ready",
+        "BTR request succeeded",
+        {
+            "candidates": len(candidate_models),
+            "rejections": len(rejection_models),
+            "best_candidate": best_candidate.time_local if best_candidate else None,
+            "elapsed_seconds": round(total_elapsed, 3),
+            "window": f"{start_time}-{end_time}"
+        }
+    )
+
     return response
