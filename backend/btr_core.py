@@ -21,6 +21,11 @@ from typing import Optional, Any
 import swisseph as swe
 
 from . import config
+from . import shadbala  # Import new Shadbala module
+from . import ayurdaya  # Import new Ayurdaya module
+from . import astro_utils  # Import astro utils
+from . import vargas  # Import new Vargas module
+from . import dashas  # Import new Dashas module
 
 logger = logging.getLogger("btr.core")
 
@@ -53,16 +58,16 @@ PALA_LEVEL_SHODHANA_PALAS = 720  # Full-day palā shodhana for ultra-precise tim
 # sequence used by BPHS.  Indices correspond to the order of the seven days.
 _PLANET_ORDER = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter', 'Venus', 'Saturn']
 
-def _weekday_index(py_weekday: int) -> int:
-    """Convert Python weekday (Monday=0) to BPHS weekday index (Sunday=0).
-
-    Args:
-        py_weekday: Python weekday where Monday=0, Sunday=6.
-
-    Returns:
-        int: An index 0–6 where 0=Sunday, 1=Monday, …, 6=Saturday.
-    """
-    return (py_weekday + 1) % 7
+# Re-export functions moved to other modules to maintain API compatibility
+# if tests import them from here.
+# (Though internal usage should update to use new modules)
+_weekday_index = astro_utils.get_weekday_index
+calculate_divisional_chart = vargas.calculate_divisional_chart
+calculate_shodasa_vargas = vargas.calculate_shodasa_vargas
+calculate_upagrahas = astro_utils.calculate_upagrahas
+get_moon_nakshatra = dashas.get_moon_nakshatra
+calculate_vimshottari_dasha = dashas.calculate_vimshottari_dasha
+get_dasha_at_date = dashas.get_dasha_at_date
 
 def _datetime_to_jd_ut(dt: datetime.datetime, tz_offset: float) -> float:
     """Convert a naive local datetime into a Julian Day in UT.
@@ -349,8 +354,8 @@ def calculate_gulika(date_local: datetime.date,
     # Count from weekday lord: Sun, Moon, Mars, Mercury, Jupiter, Venus, Saturn
     # The 8th khanda has no lord (Niresha) per BPHS 4.2
     # Saturn's khanda = Gulika period
-    day_duration = (sunset_local - sunrise_local).total_seconds()
-    day_segment = day_duration / 8.0
+    # Use timedelta arithmetic for precision to avoid floating point drift
+    day_duration_td = sunset_local - sunrise_local
     weekday_idx = _weekday_index(date_local.weekday())
     # Planet sequence: Sun(0), Moon(1), Mars(2), Mercury(3), Jupiter(4), Venus(5), Saturn(6)
     # Starting from weekday lord, find Saturn's position in the sequence
@@ -369,7 +374,12 @@ def calculate_gulika(date_local: datetime.date,
     # If Saturn would fall on khanda 7, it should be on khanda 6 instead
     # However, since we have 7 planets and 8 khandas, Saturn can occupy khandas 0-6
     # The formula (6 - weekday_idx) % 7 correctly identifies Saturn's khanda
-    gulika_day_start = sunrise_local + datetime.timedelta(seconds=day_segment * gulika_khanda_index)
+    
+    # Calculate offset: (Duration * index) / 8
+    # Using timedelta arithmetic preserves microsecond precision better than converting to seconds
+    day_offset = (day_duration_td * gulika_khanda_index) / 8
+    gulika_day_start = sunrise_local + day_offset
+    
     # BPHS 4.1-4.3: Treat Saturn's khanda itself as the Gulika ishta‑kāla.
     # Use the Saturn segment boundary (start) rather than midpoint.
     jd_gulika_day = _datetime_to_jd_ut(gulika_day_start, tz_offset)
@@ -378,14 +388,17 @@ def calculate_gulika(date_local: datetime.date,
     # Nighttime gulika (BPHS Verse 4.2)
     # For night births: divide night duration into 8 parts
     # Count from 5th weekday lord (not the day's weekday lord)
-    night_duration = (next_sunrise_local - sunset_local).total_seconds()
-    night_segment = night_duration / 8.0
+    night_duration_td = next_sunrise_local - sunset_local
     # 5th weekday lord from current weekday (weekday_idx + 4) % 7
     night_start_weekday_idx = (weekday_idx + 4) % 7
     # Find Saturn's khanda from the night start weekday lord
     # Same sequence: starting from 5th weekday lord, find Saturn's position
     gulika_night_khanda_index = (6 - night_start_weekday_idx) % 7
-    gulika_night_start = sunset_local + datetime.timedelta(seconds=night_segment * gulika_night_khanda_index)
+    
+    # Calculate offset: (Duration * index) / 8
+    night_offset = (night_duration_td * gulika_night_khanda_index) / 8
+    gulika_night_start = sunset_local + night_offset
+    
     jd_gulika_night = _datetime_to_jd_ut(gulika_night_start, tz_offset)
     night_gulika_deg = compute_sidereal_lagna(jd_gulika_night, latitude, longitude)
 
@@ -734,7 +747,7 @@ def apply_moon_purification(moon_deg: float, lagna_deg: float) -> tuple[float, f
     # Step 2: Calculate angular relationship for purification scoring
     # Find the 7th house from Moon (opposite position) for alignment verification
     moon_7th_deg = (moon_deg + 180.0) % 360.0
-    delta_lagna_moon7th = _angular_difference(lagna_deg, moon_7th_deg)
+    delta_lagna_moon7th = astro_utils.angular_difference(lagna_deg, moon_7th_deg)
     
     # Step 3: Convert to purification score (closer alignment = higher score)
     # Using standard 2° orb tolerance for palā-level precision
@@ -752,18 +765,7 @@ def apply_moon_purification(moon_deg: float, lagna_deg: float) -> tuple[float, f
     
     return ishta_kala_deg, purification_score
 
-def _angular_difference(deg1: float, deg2: float) -> float:
-    """Compute the minimum angular difference between two degrees on a circle.
 
-    Args:
-        deg1: First angle in degrees.
-        deg2: Second angle in degrees.
-
-    Returns:
-        float: The smallest absolute difference (0–180).
-    """
-    diff = abs((deg1 - deg2) % 360.0)
-    return min(diff, 360.0 - diff)
 
 def apply_bphs_hard_filters(lagna_deg: float,
                             pranapada_deg: float,
@@ -813,15 +815,16 @@ def apply_bphs_hard_filters(lagna_deg: float,
     # लग्नांशप्राणांशपदैक्यता स्यात्
     # "Lagna degrees and Pranapada degrees should be equal (पदैक्यता)"
     alignment_orb = STRICT_ORB_TOLERANCE if strict_bphs else orb_tolerance
-    padekyata_tolerance_sphuta = STRICT_PADA_EPSILON_DEGREES if strict_bphs else PADA_EPSILON_DEGREES
-    padekyata_tolerance_madhya = PADA_EPSILON_DEGREES if madhya_pranapada_deg is not None else padekyata_tolerance_sphuta
-    delta_sphuta_pp = _angular_difference(lagna_deg, pranapada_deg)
+    # Use strict epsilon (0.2°) for Padekyata if strict_bphs is True, else standard 2.0°
+    padekyata_tolerance_sphuta = STRICT_PADA_EPSILON_DEGREES if strict_bphs else orb_tolerance
+    padekyata_tolerance_madhya = STRICT_PADA_EPSILON_DEGREES if madhya_pranapada_deg is not None else padekyata_tolerance_sphuta
+    delta_sphuta_pp = astro_utils.angular_difference(lagna_deg, pranapada_deg)
     passes_padekyata_sphuta = delta_sphuta_pp <= padekyata_tolerance_sphuta
     degree_match_score = 100.0 if passes_padekyata_sphuta else 0.0
 
     delta_madhya_pp: Optional[float]
     if madhya_pranapada_deg is not None:
-        delta_madhya_pp = _angular_difference(lagna_deg, madhya_pranapada_deg)
+        delta_madhya_pp = astro_utils.angular_difference(lagna_deg, madhya_pranapada_deg)
         passes_padekyata_madhya = delta_madhya_pp <= padekyata_tolerance_madhya
     else:
         delta_madhya_pp = None
@@ -836,15 +839,15 @@ def apply_bphs_hard_filters(lagna_deg: float,
     # विना प्राणपदाच्छुद्धो गुलिकाद्वा निशाकराद्
     # "Must be verified by Pranapada OR Gulika OR Moon"
     # Check Gulika alignment (also check 7th from lagna as per some interpretations)
-    direct_gulika_delta = _angular_difference(lagna_deg, gulika_deg)
-    gulika_7th_delta = _angular_difference((lagna_deg + 180.0) % 360.0, gulika_deg)
+    direct_gulika_delta = astro_utils.angular_difference(lagna_deg, gulika_deg)
+    gulika_7th_delta = astro_utils.angular_difference((lagna_deg + 180.0) % 360.0, gulika_deg)
     delta_gulika = min(direct_gulika_delta, gulika_7th_delta)
     gulika_anchor = 'gulika' if delta_gulika == direct_gulika_delta else 'gulika_7th'
     gulika_score = max(0.0, (alignment_orb - delta_gulika) / alignment_orb) * 100.0
     gulika_score = min(100.0, gulika_score)
 
     # Check Moon alignment (निशाकराद्)
-    delta_moon = _angular_difference(lagna_deg, moon_deg)
+    delta_moon = astro_utils.angular_difference(lagna_deg, moon_deg)
     moon_score = max(0.0, (alignment_orb - delta_moon) / alignment_orb) * 100.0
     moon_score = min(100.0, moon_score)
 
@@ -932,274 +935,104 @@ def apply_bphs_hard_filters(lagna_deg: float,
 # Vimshottari Dasha Calculation (BPHS - Dasha System)
 # ============================================================================
 
-# Nakshatra lords in order (27 nakshatras, each 13°20')
-# Each nakshatra is ruled by one of 9 planets in sequence
-_NAKSHATRA_LORDS = [
-    'Ketu', 'Venus', 'Sun', 'Moon', 'Mars',  # Ashwini to Mrigashira
-    'Rahu', 'Jupiter', 'Saturn', 'Mercury',   # Ardra to Ashlesha
-    'Ketu', 'Venus', 'Sun', 'Moon', 'Mars',   # Magha to Chitra
-    'Rahu', 'Jupiter', 'Saturn', 'Mercury',   # Swati to Jyeshtha
-    'Ketu', 'Venus', 'Sun', 'Moon', 'Mars',   # Mula to Dhanishta
-    'Rahu', 'Jupiter', 'Saturn', 'Mercury'     # Shatabhisha to Revati
-]
+# Note: Dasha calculations moved to dashas.py. 
+# Re-exported at module level for backward compatibility.
 
-# Vimshottari dasha periods in years
-_DASHA_PERIODS = {
-    'Ketu': 7,
-    'Venus': 20,
-    'Sun': 6,
-    'Moon': 10,
-    'Mars': 7,
-    'Rahu': 18,
-    'Jupiter': 16,
-    'Saturn': 19,
-    'Mercury': 17
-}
+# ============================================================================
+# Planetary Strengths (Shadbala)
+# ============================================================================
 
-def get_moon_nakshatra(moon_longitude: float) -> int:
-    """Get Moon's nakshatra number (0-26).
+def calculate_planetary_strengths(jd_ut: float,
+                                  lagna_deg: float,
+                                  planets_deg: dict[str, float],
+                                  birth_dt: datetime.datetime,
+                                  latitude: float,
+                                  longitude: float,
+                                  tz_offset: float) -> dict[str, dict[str, float]]:
+    """Calculate comprehensive Shadbala (Six-Fold Strength) for all planets.
     
-    Each nakshatra spans 13°20' (13.333... degrees).
+    This function delegates to the dedicated shadbala module to compute:
+    1. Sthaana Bala (Positional)
+    2. Dig Bala (Directional)
+    3. Kaala Bala (Temporal)
+    4. Cheshta Bala (Motional)
+    5. Naisargika Bala (Natural)
+    6. Drig Bala (Aspectual)
+    
+    Required for Stage 9 BTR validation and longevity calculations.
     
     Args:
-        moon_longitude: Moon's sidereal longitude in degrees (0-360).
+        jd_ut: Julian Day in UT.
+        lagna_deg: Ascendant longitude in degrees.
+        planets_deg: Dictionary of planet longitudes.
+        birth_dt: Local birth datetime.
+        latitude: Geographic latitude.
+        longitude: Geographic longitude.
+        tz_offset: Local time zone offset.
         
     Returns:
-        int: Nakshatra number (0-26).
+        Dict with Shadbala scores (total and breakdown) for each planet.
     """
-    nakshatra_span = 360.0 / 27.0  # 13°20'
-    nakshatra_num = int(math.floor(moon_longitude / nakshatra_span)) % 27
-    return nakshatra_num
-
-def calculate_vimshottari_dasha(jd_ut_birth: float, moon_longitude: float) -> dict[str, Any]:
-    """Calculate Vimshottari dasha sequence starting from birth.
+    # Calculate sunrise/sunset for Kaala Bala (Natonnata)
+    # Use the date from birth_dt
+    sunrise, sunset = compute_sunrise_sunset(birth_dt.date(), latitude, longitude, tz_offset)
     
-    BPHS Reference: Vimshottari is primary among all dasha systems.
+    # Delegate to Shadbala module
+    strengths = shadbala.calculate_shadbala(
+        jd_ut=jd_ut,
+        lagna_deg=lagna_deg,
+        planets_deg=planets_deg,
+        birth_dt=birth_dt,
+        sunrise=sunrise,
+        sunset=sunset
+    )
     
-    Args:
-        jd_ut_birth: Julian Day of birth in UT.
-        moon_longitude: Moon's sidereal longitude in degrees.
-        
-    Returns:
-        Dict with dasha sequence and start times.
-    """
-    nakshatra_num = get_moon_nakshatra(moon_longitude)
-    nakshatra_lord = _NAKSHATRA_LORDS[nakshatra_num]
-    
-    # Calculate position within nakshatra (0-1)
-    nakshatra_span = 360.0 / 27.0
-    position_in_nakshatra = (moon_longitude % nakshatra_span) / nakshatra_span
-    
-    # Find starting dasha lord in sequence
-    dasha_sequence = ['Ketu', 'Venus', 'Sun', 'Moon', 'Mars', 'Rahu', 'Jupiter', 'Saturn', 'Mercury']
-    start_index = dasha_sequence.index(nakshatra_lord)
-    
-    # Calculate remaining time in first dasha
-    first_dasha_lord = nakshatra_lord
-    first_dasha_years = _DASHA_PERIODS[first_dasha_lord]
-    remaining_years = first_dasha_years * (1.0 - position_in_nakshatra)
-    
-    return {
-        'nakshatra_num': nakshatra_num,
-        'nakshatra_lord': nakshatra_lord,
-        'first_dasha_lord': first_dasha_lord,
-        'first_dasha_remaining_years': remaining_years,
-        'dasha_sequence': dasha_sequence,
-        'start_index': start_index
-    }
-
-def get_dasha_at_date(jd_ut_birth: float, event_date: datetime.date, moon_longitude: float) -> dict[str, Any]:
-    """Get running Mahadasha-Antardasha at a given event date.
-    
-    Args:
-        jd_ut_birth: Julian Day of birth in UT.
-        event_date: Event date to check.
-        moon_longitude: Moon's sidereal longitude at birth.
-        
-    Returns:
-        Dict with 'mahadasha', 'antardasha', and their start/end dates.
-    """
-    dasha_info = calculate_vimshottari_dasha(jd_ut_birth, moon_longitude)
-    
-    # Calculate elapsed years from birth
-    event_jd = swe.julday(event_date.year, event_date.month, event_date.day, 0.0)
-    elapsed_days = event_jd - jd_ut_birth
-    elapsed_years = elapsed_days / 365.25
-    
-    # Start from first dasha
-    dasha_sequence = dasha_info['dasha_sequence']
-    start_index = dasha_info['start_index']
-    remaining_years = dasha_info['first_dasha_remaining_years']
-    
-    # If elapsed time is within first dasha
-    if elapsed_years <= remaining_years:
-        mahadasha_lord = dasha_sequence[start_index]
-        mahadasha_years = _DASHA_PERIODS[mahadasha_lord]
-        years_into_mahadasha = elapsed_years
-    else:
-        # Find which Mahadasha we're in
-        current_years = remaining_years
-        dasha_index = start_index
-        
-        # Move to next dashas until we exceed elapsed_years
-        while current_years < elapsed_years:
-            dasha_index = (dasha_index + 1) % len(dasha_sequence)
-            mahadasha_lord = dasha_sequence[dasha_index]
-            mahadasha_years = _DASHA_PERIODS[mahadasha_lord]
-            if current_years + mahadasha_years >= elapsed_years:
-                # Found the Mahadasha
-                years_into_mahadasha = elapsed_years - current_years
-                break
-            current_years += mahadasha_years
-    
-    # Find Antardasha (sub-period within Mahadasha)
-    antardasha_sequence = dasha_sequence.copy()
-    # Rotate to start from Mahadasha lord
-    while antardasha_sequence[0] != mahadasha_lord:
-        antardasha_sequence.append(antardasha_sequence.pop(0))
-    
-    antardasha_index = 0
-    antardasha_years_elapsed = 0.0
-    
-    for i, antardasha_lord in enumerate(antardasha_sequence):
-        antardasha_years = (_DASHA_PERIODS[antardasha_lord] * mahadasha_years) / 120.0
-        if antardasha_years_elapsed + antardasha_years >= years_into_mahadasha:
-            antardasha_index = i
-            break
-        antardasha_years_elapsed += antardasha_years
-    
-    antardasha_lord = antardasha_sequence[antardasha_index]
-    antardasha_years = (_DASHA_PERIODS[antardasha_lord] * mahadasha_years) / 120.0
-    
-    return {
-        'mahadasha': mahadasha_lord,
-        'antardasha': antardasha_lord,
-        'years_into_mahadasha': years_into_mahadasha,
-        'years_into_antardasha': years_into_mahadasha - antardasha_years_elapsed
-    }
+    return strengths
 
 # ============================================================================
 # Divisional Charts (Varga Charts)
 # ============================================================================
 
-def calculate_divisional_chart(lagna_deg: float, planets: dict[str, float], division: int) -> dict[str, float]:
-    """Calculate divisional chart positions for all planets.
+# Note: Varga calculations moved to vargas.py.
+# Re-exported at module level for backward compatibility.
+
+
+
+
+
+# ============================================================================
+# Upagrahas (Non-luminous Planets)
+# ============================================================================
+
+# Note: Upagraha calculations moved to astro_utils.py.
+# Re-exported at module level for backward compatibility.
+
+def calculate_longevity_span(jd_ut: float,
+                               lagna_deg: float,
+                               planets_deg: dict[str, float],
+                               shadbala_strengths: Optional[dict[str, dict[str, float]]] = None) -> dict[str, Any]:
+    """Calculate Ayurdaya (Longevity) using Pindayu, Nisargayu, and Amsayu.
     
-    BPHS Reference: Divisional charts used for specific life areas:
-    - D-3 (Drekkana): Siblings, courage
-    - D-7 (Saptamsa): Children
-    - D-9 (Navamsa): Marriage, spouse
-    - D-10 (Dasamsa): Career, profession
-    - D-12 (Dwadasamsa): Parents, family
-    - D-60 (Shashtiamsa): Detailed analysis
+    Required for Stage 9 "Ultimate Validation".
     
     Args:
-        lagna_deg: Ascendant longitude in degrees.
-        planets: Dict of planet longitudes (sun, moon, mars, etc.).
-        division: Division number (3, 7, 9, 10, 12, or 60).
+        jd_ut: Julian Day in UT.
+        lagna_deg: Ascendant longitude.
+        planets_deg: Planet longitudes.
+        shadbala_strengths: Optional comprehensive Shadbala breakdown.
         
     Returns:
-        Dict with divisional chart positions for lagna and all planets.
+        Dict with final longevity years and breakdown.
     """
-    divisional_positions = {}
-    
-    # Calculate lagna in divisional chart
-    lagna_sign = int(math.floor(lagna_deg / 30.0)) % 12
-    lagna_deg_in_sign = lagna_deg % 30.0
-    division_size = 30.0 / division
-    division_part = int(math.floor(lagna_deg_in_sign / division_size))
-    divisional_lagna_sign = (lagna_sign * division + division_part) % 12
-    divisional_lagna_deg = (divisional_lagna_sign * 30.0) + ((lagna_deg_in_sign % division_size) * division)
-    divisional_positions['lagna'] = divisional_lagna_deg % 360.0
-    
-    # Calculate each planet in divisional chart
-    for planet_name, planet_deg in planets.items():
-        planet_sign = int(math.floor(planet_deg / 30.0)) % 12
-        planet_deg_in_sign = planet_deg % 30.0
-        division_part = int(math.floor(planet_deg_in_sign / division_size))
-        divisional_planet_sign = (planet_sign * division + division_part) % 12
-        divisional_planet_deg = (divisional_planet_sign * 30.0) + ((planet_deg_in_sign % division_size) * division)
-        divisional_positions[planet_name] = divisional_planet_deg % 360.0
-    
-    return divisional_positions
-
-def _get_house_from_lagna(planet_deg: float, lagna_deg: float) -> int:
-    """Get house number (1-12) of planet from lagna.
-    
-    Args:
-        planet_deg: Planet longitude in degrees.
-        lagna_deg: Lagna longitude in degrees.
+    shadbala_summary: Optional[dict[str, float]] = None
+    if shadbala_strengths:
+        shadbala_summary = {
+            p: data.get('rupa', 0.0) 
+            for p, data in shadbala_strengths.items() 
+            if isinstance(data, dict)
+        }
         
-    Returns:
-        int: House number (1-12).
-    """
-    diff = (planet_deg - lagna_deg) % 360.0
-    house = int(math.floor(diff / 30.0)) + 1
-    return house if house <= 12 else 1
-
-def _get_sign_lord(sign: int) -> str:
-    """Get lord of zodiac sign.
-    
-    Args:
-        sign: Sign number (0=Aries, 1=Taurus, ..., 11=Pisces).
-        
-    Returns:
-        str: Planet name (sun, moon, mars, mercury, jupiter, venus, saturn).
-    """
-    sign_lords = {
-        0: 'mars',    # Aries
-        1: 'venus',   # Taurus
-        2: 'mercury', # Gemini
-        3: 'moon',    # Cancer
-        4: 'sun',     # Leo
-        5: 'mercury', # Virgo
-        6: 'venus',   # Libra
-        7: 'mars',    # Scorpio
-        8: 'jupiter', # Sagittarius
-        9: 'saturn',  # Capricorn
-        10: 'saturn', # Aquarius
-        11: 'jupiter' # Pisces
-    }
-    return sign_lords[sign % 12]
-
-def calculate_upagrahas(sun_longitude: float) -> dict[str, float]:
-    """Calculate the longitudes of the five non-luminous planets (Upagrahas).
-    
-    BPHS Verses 3.53-56: dhumadyaprakashagrahanayanamaha
-    
-    Args:
-        sun_longitude: Sun's sidereal longitude in degrees.
-        
-    Returns:
-        Dict with keys: 'dhuma', 'vyatipata', 'parivesha', 'indrachapa', 'upaketu'
-    """
-    # BPHS 3.53: Dhuma = Sun + 4 signs, 13 degrees, 20 minutes
-    # 4 signs = 120 degrees. 13 degrees. 20 minutes = 13.333... degrees.
-    # Total = 133.333... degrees
-    dhuma = (sun_longitude + 133 + (20 / 60.0)) % 360.0
-    
-    # BPHS 3.54: Vyatipata = 12 signs - Dhuma
-    vyatipata = (360.0 - dhuma) % 360.0
-    
-    # BPHS 3.54: Parivesha = Vyatipata + 6 signs
-    parivesha = (vyatipata + 180.0) % 360.0
-    
-    # BPHS 3.55: Indrachapa (Kodanda) = 12 signs - Parivesha
-    indrachapa = (360.0 - parivesha) % 360.0
-    
-    # BPHS 3.55: Upaketu = Indrachapa + 16 degrees, 40 minutes
-    # 16 degrees, 40 minutes = 16.666... degrees
-    # The verse actually says to add 16d 40m, but also that adding 1 sign (30d) to Upaketu gives Sun.
-    # Let's use the check: Upaketu = Sun - 1 sign
-    upaketu = (sun_longitude - 30.0) % 360.0
-
-    return {
-        'dhuma': dhuma,
-        'vyatipata': vyatipata,
-        'parivesha': parivesha,
-        'indrachapa': indrachapa,
-        'upaketu': upaketu
-    }
+    return ayurdaya.calculate_final_longevity(jd_ut, lagna_deg, planets_deg, shadbala_rupas=shadbala_summary)
 
 # ============================================================================
 # Physical Traits Scoring (BPHS Chapter 2)
@@ -1309,7 +1142,7 @@ def score_physical_traits(lagna_deg: float, planets: dict[str, float], traits: d
         
         planets_in_lagna = get_planets_in_lagna()
         aspects_to_lagna = get_planet_aspects_to_lagna()
-        lagnesh = _get_sign_lord(lagna_sign)
+        lagnesh = astro_utils.get_sign_lord_from_index(lagna_sign)
         
         height_score = 0.0
         if height_trait == 'TALL':
@@ -1352,7 +1185,7 @@ def score_physical_traits(lagna_deg: float, planets: dict[str, float], traits: d
     if build_trait:
         planets_in_lagna = get_planets_in_lagna()
         aspects_to_lagna = get_planet_aspects_to_lagna()
-        lagnesh = _get_sign_lord(lagna_sign)
+        lagnesh = astro_utils.get_sign_lord_from_index(lagna_sign)
         
         build_score = 40.0  # Base score
         
@@ -1577,10 +1410,12 @@ def apply_tattwa_shodhana(lagna_deg: float, gender: str) -> float:
 # ============================================================================
 
 def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, float], 
-                       events: dict[str, Any], moon_longitude: float) -> dict[str, float]:
-    """Verify life events using dashas and divisional charts.
+                       events: dict[str, Any], moon_longitude: float,
+                       shadbala_scores: Optional[dict[str, dict[str, float]]] = None) -> dict[str, float]:
+    """Verify life events using dashas, divisional charts, and planetary strength.
     
     BPHS Chapter 12: Life events timing and verification.
+    Uses Shadbala strength to weight the capacity of lords to deliver results.
     
     Args:
         jd_ut_birth: Julian Day of birth in UT.
@@ -1588,12 +1423,26 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, 
         planets: Dict of planet longitudes.
         events: Dict with 'marriage', 'children', 'career', 'siblings', 'parents' keys.
         moon_longitude: Moon's sidereal longitude at birth.
+        shadbala_scores: Optional Shadbala strength dictionary for weighting.
         
     Returns:
         Dict with scores (0-100) for each event category.
     """
     scores = {}
     events = events or {}
+    
+    # Helper to get strength factor (0.5 to 1.5) based on Rupas
+    def _get_strength_factor(planet_name: str) -> float:
+        if not shadbala_scores or planet_name not in shadbala_scores:
+            return 1.0
+        rupas = shadbala_scores[planet_name].get('rupa', 0.0)
+        # BPHS Standard: Average strength ~5-6 Rupas. 
+        # Factor: <4 -> 0.5, 4-5 -> 0.8, 5-7 -> 1.0, 7-8 -> 1.2, >8 -> 1.5
+        if rupas < 4.0: return 0.5
+        if rupas < 5.0: return 0.8
+        if rupas < 7.0: return 1.0
+        if rupas < 8.0: return 1.2
+        return 1.5
 
     def _first_date(item: Any) -> Optional[str]:
         if isinstance(item, str):
@@ -1626,17 +1475,25 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, 
             d9_lagna = d9['lagna']
             d9_7th_house = (d9_lagna + 180.0) % 360.0  # 7th from lagna
             d9_7th_sign = int(math.floor(d9_7th_house / 30.0)) % 12
-            d9_7th_lord = _get_sign_lord(d9_7th_sign)
+            d9_7th_lord = astro_utils.get_sign_lord_from_index(d9_7th_sign)
             
             # Favorable dashas for marriage: Venus, Jupiter, Moon
+            # Weighted by strength
+            md_lord = dasha_at_marriage['mahadasha'].lower()
             favorable_dashas = ['venus', 'jupiter', 'moon']
-            dasha_score = 100.0 if dasha_at_marriage['mahadasha'].lower() in favorable_dashas else 50.0
+            base_dasha_score = 100.0 if md_lord in favorable_dashas else 50.0
+            dasha_score = base_dasha_score * _get_strength_factor(md_lord)
             
-            # D-9 7th house should have benefic influence
+            # D-9 7th house strength
+            # Use 7th lord strength from Shadbala
+            lord_strength = _get_strength_factor(d9_7th_lord)
+            
+            # D-9 7th house benefic influence? 
             benefic_planets = ['venus', 'jupiter', 'moon', 'mercury']
-            d9_score = 100.0 if d9_7th_lord in benefic_planets else 50.0
+            base_d9_score = 100.0 if d9_7th_lord in benefic_planets else 50.0
+            d9_score = base_d9_score * lord_strength
             
-            scores['marriage'] = (dasha_score + d9_score) / 2.0
+            scores['marriage'] = min(100.0, (dasha_score + d9_score) / 2.0)
         except (ValueError, KeyError):
             scores['marriage'] = 0.0
     else:
@@ -1661,41 +1518,40 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, 
         children_dates = child_dates
         
         if children_count > 0 and children_dates:
-            # Calculate D-7 chart
             d7 = calculate_divisional_chart(lagna_deg, planets, 7)
             d7_lagna = d7['lagna']
             d7_5th_house = (d7_lagna + 120.0) % 360.0  # 5th from lagna
             d7_5th_sign = int(math.floor(d7_5th_house / 30.0)) % 12
-            d7_5th_lord = _get_sign_lord(d7_5th_sign)
+            d7_5th_lord = astro_utils.get_sign_lord_from_index(d7_5th_sign)
             
-            # Verify each child birth date
             child_scores = []
             for child_date_str in children_dates[:children_count]:
                 try:
                     child_date = datetime.datetime.strptime(child_date_str, '%d-%m-%Y').date()
                     dasha_at_birth = get_dasha_at_date(jd_ut_birth, child_date, moon_longitude)
                     
-                    # Favorable dashas for children: Jupiter, Moon, Venus
+                    md_lord = dasha_at_birth['mahadasha'].lower()
                     favorable_dashas = ['jupiter', 'moon', 'venus']
-                    dasha_score = 100.0 if dasha_at_birth['mahadasha'].lower() in favorable_dashas else 50.0
-                    child_scores.append(dasha_score)
+                    base_score = 100.0 if md_lord in favorable_dashas else 50.0
+                    score = base_score * _get_strength_factor(md_lord)
+                    child_scores.append(score)
                 except (ValueError, KeyError):
                     child_scores.append(0.0)
             
-            # D-7 5th house should have benefic influence
             benefic_planets = ['jupiter', 'moon', 'venus']
-            d7_score = 100.0 if d7_5th_lord in benefic_planets else 50.0
+            base_d7 = 100.0 if d7_5th_lord in benefic_planets else 50.0
+            d7_score = base_d7 * _get_strength_factor(d7_5th_lord)
             
             if child_scores:
-                scores['children'] = (sum(child_scores) / len(child_scores) + d7_score) / 2.0
+                scores['children'] = min(100.0, (sum(child_scores) / len(child_scores) + d7_score) / 2.0)
             else:
-                scores['children'] = d7_score
+                scores['children'] = min(100.0, d7_score)
         else:
             scores['children'] = 0.0
     else:
         scores['children'] = 0.0
     
-    # Career verification (D-10 Dasamsa, 10th house, BPHS 12.211)
+    # Career verification (D-10 Dasamsa, 10th house)
     if 'career' in events and events['career']:
         career_dates_raw = events['career']
         career_dates: list[str] = []
@@ -1708,55 +1564,49 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, 
             career_dates = career_dates_raw if isinstance(career_dates_raw, list) else []
         
         if career_dates:
-            # Calculate D-10 chart
             d10 = calculate_divisional_chart(lagna_deg, planets, 10)
             d10_lagna = d10['lagna']
-            d10_10th_house = d10_lagna  # 10th house = lagna in D-10
+            d10_10th_house = d10_lagna  # 10th house = lagna in D-10 (Wait, 10th from Lagna)
+            # D-10 10th house is 270 deg from Lagna
+            d10_10th_house = (d10_lagna + 270.0) % 360.0 
             d10_10th_sign = int(math.floor(d10_10th_house / 30.0)) % 12
-            d10_10th_lord = _get_sign_lord(d10_10th_sign)
+            d10_10th_lord = astro_utils.get_sign_lord_from_index(d10_10th_sign)
             
-            # Verify each career event date
             career_scores = []
             for career_date_str in career_dates:
                 try:
                     career_date = datetime.datetime.strptime(career_date_str, '%d-%m-%Y').date()
                     dasha_at_event = get_dasha_at_date(jd_ut_birth, career_date, moon_longitude)
                     
-                    # Favorable dashas for career: Sun, Jupiter, Mercury
-                    favorable_dashas = ['sun', 'jupiter', 'mercury']
-                    dasha_score = 100.0 if dasha_at_event['mahadasha'].lower() in favorable_dashas else 50.0
-                    career_scores.append(dasha_score)
+                    md_lord = dasha_at_event['mahadasha'].lower()
+                    favorable_dashas = ['sun', 'jupiter', 'mercury', 'saturn', 'mars']
+                    base_score = 100.0 if md_lord in favorable_dashas else 50.0
+                    score = base_score * _get_strength_factor(md_lord)
+                    career_scores.append(score)
                 except (ValueError, KeyError):
                     career_scores.append(0.0)
             
-            # D-10 10th lord should be strong (not weak per BPHS 12.211)
-            # Strong planets: Sun, Jupiter, Mars
-            strong_planets = ['sun', 'jupiter', 'mars']
-            d10_score = 100.0 if d10_10th_lord in strong_planets else 50.0
+            strong_planets = ['sun', 'jupiter', 'mars', 'saturn', 'mercury']
+            base_d10 = 100.0 if d10_10th_lord in strong_planets else 50.0
+            d10_score = base_d10 * _get_strength_factor(d10_10th_lord)
             
             if career_scores:
-                scores['career'] = (sum(career_scores) / len(career_scores) + d10_score) / 2.0
+                scores['career'] = min(100.0, (sum(career_scores) / len(career_scores) + d10_score) / 2.0)
             else:
-                scores['career'] = d10_score
+                scores['career'] = min(100.0, d10_score)
         else:
             scores['career'] = 0.0
     else:
         scores['career'] = 0.0
 
     # Siblings verification (D-3 Drekkana, 3rd house)
-    # BPHS: 3rd house for siblings, Mars is karaka.
     if 'siblings' in events and events['siblings']:
         siblings_data = events['siblings']
-        # D-3 calculation
         d3 = calculate_divisional_chart(lagna_deg, planets, 3)
         d3_lagna = d3['lagna']
-        d3_3rd_house = (d3_lagna + 60.0) % 360.0 # 3rd from lagna
+        d3_3rd_house = (d3_lagna + 60.0) % 360.0 
         d3_3rd_sign = int(math.floor(d3_3rd_house / 30.0)) % 12
-        d3_3rd_lord = _get_sign_lord(d3_3rd_sign)
-        
-        # Basic logic: If siblings exist, 3rd lord and Mars should be reasonably placed.
-        # If no siblings, they might be afflicted.
-        # This is a simplification.
+        d3_3rd_lord = astro_utils.get_sign_lord_from_index(d3_3rd_sign)
         
         has_siblings = False
         for sib in siblings_data:
@@ -1764,52 +1614,47 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, 
                  has_siblings = True
                  break
         
-        # Score based on Karaka (Mars) strength and 3rd lord
-        # We don't have full shadbala, so we use simple sign placement for now
-        mars_score = 50.0 # Default
-        # Check Mars in D-3
-        # (Logic placeholder: In a real system we check friendly signs, etc.)
+        # Use 3rd lord strength and Mars strength
+        lord_strength = _get_strength_factor(d3_3rd_lord)
+        mars_strength = _get_strength_factor('mars')
         
-        # For now, assume if candidate has valid D-3 3rd lord, we give a base score
-        # If user reported siblings, we expect 3rd house not to be totally destroyed
-        scores['siblings'] = 75.0 # Placeholder for now as D-3 logic is complex
+        base_score = 60.0
+        scores['siblings'] = min(100.0, base_score * ((lord_strength + mars_strength)/2))
         
     else:
         scores['siblings'] = 0.0
 
-    # Parents verification (D-12 Dwadasamsa, 4th/9th houses)
-    # BPHS: 9th for Father, 4th for Mother. Sun for Father, Moon for Mother.
+    # Parents verification (D-12 Dwadasamsa)
     if 'parents' in events and events['parents']:
         parents_data = events['parents']
-        d12 = calculate_divisional_chart(lagna_deg, planets, 12)
-        
         parent_scores = []
         for parent in parents_data:
             if isinstance(parent, dict):
-                relation = parent.get('relation', '').lower()
-                is_alive = parent.get('is_alive', True)
                 death_date = parent.get('death_date')
-                
                 if death_date:
                      try:
                         dd = datetime.datetime.strptime(death_date, '%d-%m-%Y').date()
                         dasha = get_dasha_at_date(jd_ut_birth, dd, moon_longitude)
-                        # Death often happens in Maraka dashas (2nd/7th lords) or Saturn/Rahu
-                        # Simplified check
+                        md_lord = dasha['mahadasha'].lower()
                         malefic_dashas = ['saturn', 'rahu', 'ketu', 'mars']
-                        p_score = 80.0 if dasha['mahadasha'].lower() in malefic_dashas else 50.0
+                        base_p = 80.0 if md_lord in malefic_dashas else 50.0
+                        # Death timing: Strong malefics are more capable killers
+                        if md_lord in malefic_dashas:
+                            p_score = base_p * _get_strength_factor(md_lord)
+                        else:
+                            p_score = base_p
                         parent_scores.append(p_score)
                      except:
                          pass
         
         if parent_scores:
-            scores['parents'] = sum(parent_scores) / len(parent_scores)
+            scores['parents'] = min(100.0, sum(parent_scores) / len(parent_scores))
         else:
-             scores['parents'] = 60.0 # Default if no dates to verify
+             scores['parents'] = 60.0 
     else:
         scores['parents'] = 0.0
 
-    # Major events (health/relocation/awards) - dashā alignment heuristic
+    # Major events
     if 'major' in events and events['major']:
         major_events_raw = events['major']
         major_dates: list[str] = []
@@ -1824,22 +1669,22 @@ def verify_life_events(jd_ut_birth: float, lagna_deg: float, planets: dict[str, 
                 try:
                     event_date = datetime.datetime.strptime(major_date, '%d-%m-%Y').date()
                     dasha = get_dasha_at_date(jd_ut_birth, event_date, moon_longitude)
-                    # Benefic dashas for stability/health/recognition per general BPHS benefic list
+                    md_lord = dasha['mahadasha'].lower()
                     benefic_dashas = ['jupiter', 'venus', 'moon', 'mercury']
-                    score = 80.0 if dasha['mahadasha'].lower() in benefic_dashas else 60.0
+                    base_score = 80.0 if md_lord in benefic_dashas else 60.0
+                    score = base_score * _get_strength_factor(md_lord)
                     major_scores.append(score)
                 except (ValueError, KeyError):
                     major_scores.append(50.0)
-            scores['major'] = sum(major_scores) / len(major_scores) if major_scores else 0.0
+            scores['major'] = min(100.0, sum(major_scores) / len(major_scores) if major_scores else 0.0)
         else:
             scores['major'] = 0.0
     else:
         scores['major'] = 0.0
     
-    # Calculate overall life events score
     event_scores = [s for s in scores.values() if s > 0]
     if event_scores:
-        scores['overall'] = sum(event_scores) / len(event_scores)
+        scores['overall'] = min(100.0, sum(event_scores) / len(event_scores))
     else:
         scores['overall'] = 0.0
     
@@ -1927,14 +1772,14 @@ def palashodhana_search(candidate_record: dict[str, Any],
         )
         
         if accepted_val:
-            current_delta = _angular_difference(lagna_val, sphuta_pp_val)
+            current_delta = astro_utils.angular_difference(lagna_val, sphuta_pp_val)
             return True, current_delta, (adjusted_time_local, lagna_val, sphuta_pp_val, madhya_pp_val, scores_val)
         else:
             return False, 999.0, None
     
     # Phase 1: Binary search to find promising regions
     best_candidate = candidate_record.copy()
-    best_delta = _angular_difference(base_lagna_deg, base_sphuta_pp)
+    best_delta = astro_utils.angular_difference(base_lagna_deg, base_sphuta_pp)
     improved = False
     promising_regions = []
     
@@ -2022,7 +1867,7 @@ def palashodhana_search(candidate_record: dict[str, Any],
     
     if improved:
         best_candidate['shodhana_success'] = True
-        improvement_amount = (best_delta - _angular_difference(base_lagna_deg, base_sphuta_pp))
+        improvement_amount = (best_delta - astro_utils.angular_difference(base_lagna_deg, base_sphuta_pp))
         best_candidate['overall_improvement'] = f"Delta improved by {improvement_amount:.3f}°"
         
         # Add performance metrics
@@ -2112,6 +1957,22 @@ def search_candidate_times(dob: datetime.date,
             orb_tolerance=orb_tolerance,
             strict_bphs=strict_bphs
         )
+        
+        # Compute Shadbala & Longevity if accepted (optimization: don't compute if rejected?)
+        # But accepted status might change if we strictly enforced Shadbala/Longevity thresholds?
+        # Currently, Stage 9 validation is post-filter.
+        
+        shadbala_val = None
+        ayurdaya_val = None
+        
+        if accepted_val:
+            # Compute Shadbala
+            shadbala_val = calculate_planetary_strengths(
+                jd_ut_val, lagna_val, planets_val, candidate_dt, latitude, longitude, tz_offset
+            )
+            
+            # Compute Ayurdaya
+            ayurdaya_val = calculate_longevity_span(jd_ut_val, lagna_val, planets_val, shadbala_strengths=shadbala_val)
 
         return {
             'jd_ut': jd_ut_val,
@@ -2128,7 +1989,9 @@ def search_candidate_times(dob: datetime.date,
             'special_lagnas': special_lagnas_val,
             'nisheka': nisheka_val,
             'accepted': accepted_val,
-            'scores': scores_val
+            'scores': scores_val,
+            'shadbala': shadbala_val,
+            'ayurdaya': ayurdaya_val
         }
 
     def evaluate_and_score(candidate_dt: datetime.datetime) -> dict[str, Any]:
@@ -2137,13 +2000,21 @@ def search_candidate_times(dob: datetime.date,
         eval_result = evaluate_candidate(candidate_dt, gulika_deg_value)
 
         traits_scores: dict[str, float] = {}
-        if optional_traits:
+        if optional_traits and eval_result['accepted']:
             traits_scores = score_physical_traits(eval_result['lagna_deg'], eval_result['planets'], optional_traits)
 
         events_scores: dict[str, float] = {}
-        if optional_events:
+        if optional_events and eval_result['accepted']:
             jd_ut_birth = eval_result['jd_ut']
-            events_scores = verify_life_events(jd_ut_birth, eval_result['lagna_deg'], eval_result['planets'], optional_events, eval_result['moon_deg'])
+            # Pass shadbala scores if available
+            events_scores = verify_life_events(
+                jd_ut_birth, 
+                eval_result['lagna_deg'], 
+                eval_result['planets'], 
+                optional_events, 
+                eval_result['moon_deg'],
+                shadbala_scores=eval_result['shadbala']
+            )
 
         return {
             'eval': eval_result,
@@ -2166,11 +2037,29 @@ def search_candidate_times(dob: datetime.date,
             scores['degree_match'] * 0.30 +
             scores['combined_verification'] * 0.30
         )
-        heuristic_score = (
+        
+        heuristic_base = (
             (traits_scores.get('overall', 0.0) if traits_scores else 0.0) * 0.40 +
             (events_scores.get('overall', 0.0) if events_scores else 0.0) * 0.40 +
             nisheka_val['gestation_score'] * 0.20
         )
+        
+        # Enhance heuristic score with Shadbala and Longevity confidence
+        # Stage 9 Validation Bonus
+        validation_bonus = 0.0
+        if eval_result['shadbala']:
+            # High average strength implies stronger chart
+            total_rupas = sum(p['rupa'] for p in eval_result['shadbala'].values())
+            avg_rupa = total_rupas / 7.0
+            if avg_rupa > 6.0: validation_bonus += 5.0
+        
+        if eval_result['ayurdaya']:
+            # Plausible longevity (e.g. matches current age +)
+            # Hard to score without death date. Just presence adds confidence in completeness.
+            pass
+            
+        heuristic_score = min(100.0, heuristic_base + validation_bonus)
+
         # Keep BPHS compliance primary but let real-world evidence influence ordering.
         composite_score = (bphs_score * 0.7) + (heuristic_score * 0.3)
 
@@ -2207,6 +2096,21 @@ def search_candidate_times(dob: datetime.date,
             },
             'composite_score': round(composite_score, 2)
         }
+        
+        # Add Shadbala Summary
+        if eval_result['shadbala']:
+            candidate_record['shadbala_summary'] = {
+                k: v['rupa'] for k, v in eval_result['shadbala'].items()
+            }
+            
+        # Add Ayurdaya Summary
+        if eval_result['ayurdaya']:
+            candidate_record['ayurdaya_summary'] = {
+                'pindayu': eval_result['ayurdaya']['pindayu_years'],
+                'nisargayu': eval_result['ayurdaya']['nisargayu_years'],
+                'amsayu': eval_result['ayurdaya']['amsayu_years'],
+                'final': eval_result['ayurdaya']['final_longevity']
+            }
 
         if traits_scores:
             candidate_record['physical_traits_scores'] = {

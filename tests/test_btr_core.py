@@ -1113,7 +1113,7 @@ class TestEnhancedScoring:
     
     def test_composite_score_sorting(self):
         """Test that candidates are sorted by composite score."""
-        dob = datetime.date(2024, 1, 15)
+        dob = datetime.date(2024, 1, 1)
         latitude = 28.6139
         longitude = 77.2090
         tz_offset = 5.5

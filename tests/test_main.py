@@ -190,7 +190,7 @@ class TestAPIStructure:
         monkeypatch.setattr(btr_core, "search_candidate_times", lambda **kwargs: fake_search(**kwargs))
 
         request_data = {
-            "dob": "2024-01-15",
+            "dob": "15-01-2024",
             "pob_text": "Test Place",
             "tz_offset_hours": 0.0,  # intentionally wrong to test override
             "approx_tob": {
@@ -250,7 +250,7 @@ class TestAPIStructure:
         monkeypatch.setattr(btr_core, "search_candidate_times", lambda **kwargs: fake_search(**kwargs))
 
         request_data = {
-            "dob": "2024-01-15",
+            "dob": "15-01-2024",
             "pob_text": "Nowhere",
             "tz_offset_hours": 0.0,
             "approx_tob": {

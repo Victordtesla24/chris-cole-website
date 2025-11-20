@@ -17,7 +17,7 @@ def test_truly_no_candidates_scenario():
     
     # Use parameters that make BPHS compliance nearly impossible
     restrictive_request = {
-        "dob": "2020-03-15",  # Recent date
+        "dob": "15-03-2020",  # Recent date
         "pob_text": "North Pole",  # Invalid location
         "tz_offset_hours": 0.0,
         "approx_tob": {
@@ -33,7 +33,7 @@ def test_truly_no_candidates_scenario():
     # This might fail on geocoding, let me try a different approach
     # Use a very narrow, impossible time window
     impossible_request = {
-        "dob": "1990-06-15",
+        "dob": "15-06-1990",
         "pob_text": "Tokyo, Japan",  # Valid location
         "tz_offset_hours": 9.0,
         "time_range_override": {
@@ -96,7 +96,7 @@ def test_error_recovery_flow_structure():
     """Test that the error recovery provides proper structure for UI."""
     
     # Use parameters likely to trigger recovery flow
-    future_dob = (datetime.date.today() + datetime.timedelta(days=365)).isoformat()
+    future_dob = (datetime.date.today() + datetime.timedelta(days=365)).strftime("%d-%m-%Y")
     recovery_request = {
         "dob": future_dob,  # Future date - should fail
         "pob_text": "Test City",
@@ -115,7 +115,7 @@ def test_error_recovery_flow_structure():
     
     # Now test NO_CANDIDATES structure by modifying a request to trigger it
     normal_request = {
-        "dob": "1985-06-15",
+        "dob": "15-06-1985",
         "pob_text": "Mumbai, India",
         "tz_offset_hours": 5.5,
         "time_range_override": {
