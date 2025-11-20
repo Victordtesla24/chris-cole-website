@@ -690,9 +690,20 @@ class TestUATEdgeCases:
     def test_malformed_request_handling(self):
         """Test API handles malformed requests gracefully."""
         
-        # Invalid date format (YYYY-MM-DD in this case, since we now expect DD-MM-YYYY)
+        # Valid date format in ISO (YYYY-MM-DD) - should now be accepted
+        iso_request = {
+            "dob": "1990-01-15",  # ISO format (YYYY-MM-DD)
+            "pob_text": "Delhi, India",
+            "tz_offset_hours": 5.5,
+            "approx_tob": {"mode": "unknown"}
+        }
+        
+        response = client.post("/api/btr", json=iso_request)
+        assert response.status_code in [200, 404]  # Should NOT be 400
+        
+        # Truly invalid date format
         malformed_request = {
-            "dob": "1990-01-15",  # Wrong format (YYYY-MM-DD)
+            "dob": "invalid-date-string",
             "pob_text": "Delhi, India",
             "tz_offset_hours": 5.5,
             "approx_tob": {"mode": "unknown"}

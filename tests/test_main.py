@@ -382,3 +382,22 @@ class TestAPIStructure:
                     assert candidate["physical_traits_scores"] is not None
                 if "life_events_scores" in candidate:
                     assert candidate["life_events_scores"] is not None
+
+    def test_north_pole_sunrise_failure(self, client):
+        """
+        Reproduce the Swiss Ephemeris error when location is extreme (North Pole).
+        """
+        request_data = {
+            "dob": "15-01-1990",
+            "pob_text": "North Pole",
+            "tz_offset_hours": 0.0,
+            "approx_tob": {
+                "mode": "unknown"
+            }
+        }
+        # This is expected to fail with 422 now due to handled RuntimeError
+        response = client.post("/api/btr", json=request_data)
+        
+        # Assert 422 Unprocessable Entity (semantic error)
+        assert response.status_code == 422
+        assert "Astronomical calculation failed" in response.json()["detail"]

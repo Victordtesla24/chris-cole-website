@@ -231,6 +231,7 @@ class PhysicalTraitsScore(BaseModel):
     build: Optional[float] = None
     complexion: Optional[float] = None
     overall: Optional[float] = None
+    model_config = ConfigDict(extra='allow')
 
 class LifeEventsScore(BaseModel):
     marriage: Optional[float] = None
@@ -278,6 +279,8 @@ class BTRResponse(BaseModel):
     best_candidate: Optional[BTRCandidate]
     rejections: Optional[List[RejectedCandidate]] = None
     notes: Optional[str] = None
+    suggested_questions: Optional[List[Dict[str, Any]]] = None
+    needs_refinement: bool = False
 
 class ClientLogEvent(BaseModel):
     """Payload for frontend/client log forwarding."""
@@ -749,13 +752,19 @@ async def btr(request: BTRRequest):
         }
     )
     # Parse date of birth
-    try:
-        dob_date = datetime.datetime.strptime(request.dob, "%d-%m-%Y").date()
-        if dob_date > datetime.date.today():
-            raise HTTPException(status_code=400, detail="Date of birth cannot be in the future.")
-    except ValueError:
-        logger.exception("[req:%s] Invalid dob format", request_id)
-        raise HTTPException(status_code=400, detail="Invalid date format for dob. Use DD-MM-YYYY.")
+    dob_date = None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            dob_date = datetime.datetime.strptime(request.dob, fmt).date()
+            if dob_date > datetime.date.today():
+                raise HTTPException(status_code=400, detail="Date of birth cannot be in the future.")
+            break
+        except ValueError:
+            continue
+
+    if dob_date is None:
+        logger.exception("[req:%s] Invalid dob format: %s", request_id, request.dob)
+        raise HTTPException(status_code=400, detail="Invalid date format for dob. Use DD-MM-YYYY or YYYY-MM-DD.")
 
     # Geocode the place
     _log_phase(request_id, 1, "Geocode", "Requesting geocode from OpenCage")
@@ -832,6 +841,13 @@ async def btr(request: BTRRequest):
     try:
         sunrise_local, sunset_local = btr_core.compute_sunrise_sunset(dob_date, latitude, longitude, tz_offset_hours_to_use)
     except RuntimeError as e:
+        error_msg = str(e)
+        if "Swiss Ephemeris" in error_msg:
+            logger.warning("[req:%s] Swiss Ephemeris calculation failed (likely polar location): %s", request_id, e)
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Astronomical calculation failed for this location/date (likely due to polar day/night). BTR requires valid sunrise/sunset. Error: {error_msg}"
+            )
         logger.exception("[req:%s] Sunrise/sunset calculation failed: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to calculate sunrise/sunset: {str(e)}")
     except Exception as e:
@@ -852,6 +868,13 @@ async def btr(request: BTRRequest):
     try:
         gulika_info = btr_core.calculate_gulika(dob_date, latitude, longitude, tz_offset_hours_to_use)
     except RuntimeError as e:
+        error_msg = str(e)
+        if "Swiss Ephemeris" in error_msg:
+            logger.warning("[req:%s] Swiss Ephemeris calculation failed in Gulika (likely polar location): %s", request_id, e)
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Astronomical calculation failed for Gulika (likely due to polar day/night). Error: {error_msg}"
+            )
         logger.exception("[req:%s] Gulika calculation failed: %s", request_id, e)
         raise HTTPException(status_code=500, detail=f"Failed to calculate Gulika: {str(e)}")
     except Exception as e:
@@ -1064,6 +1087,71 @@ async def btr(request: BTRRequest):
         "and optional physical traits/life events verification."
     )
 
+    # Refinement Logic: Check if best candidate meets Parashara's high certainty standards (>= 95%)
+    needs_refinement = False
+    suggested_questions_refine = None
+    
+    if candidates and best_candidate:
+        # Logic to determine if refinement is needed
+        # Case 1: Score is below 95% (Partial Match)
+        is_high_confidence = (best_candidate.composite_score or 0.0) >= 95.0
+        
+        # Case 2: Score is high, but input is minimal (lack of corroborating evidence)
+        # We check if heuristic components (traits/events) contributed to the score
+        # The composite score calculation in btr_core now penalizes lack of evidence for some anchors,
+        # but we should be explicit here about asking for missing data.
+        has_traits = bool(traits_for_scoring)
+        has_events = bool(events_for_scoring)
+        is_minimal_input = not (has_traits or has_events)
+        
+        if not is_high_confidence or is_minimal_input:
+            needs_refinement = True
+            
+            # Reuse input analysis to suggest missing data
+            refinement_analysis = _analyze_input_completeness(request)
+            suggested_questions_refine = refinement_analysis.get("suggested_questions", [])
+            
+            # If input is technically "complete" but score is low, add specific refinement questions
+            if not suggested_questions_refine:
+                # Identify weak points in the best candidate
+                verification = best_candidate.verification_scores
+                
+                # Case 1: Padekyata (Degree Match) is low
+                if verification.get('degree_match', 0) < 100.0:
+                    suggested_questions_refine.append({
+                        "field": "verify_birth_time_precision",
+                        "priority": 1,
+                        "message": "Birth time needs slight refinement for perfect degree match (BPHS 4.6)",
+                        "hint": f"The best candidate is off by {best_candidate.delta_pp_deg:.2f}°. Please verify seconds if possible or check physical traits."
+                    })
+                
+                # Case 2: Traits don't match well (if provided)
+                elif best_candidate.physical_traits_scores and best_candidate.physical_traits_scores.overall and best_candidate.physical_traits_scores.overall < 80.0:
+                     suggested_questions_refine.append({
+                        "field": "verify_physical_traits",
+                        "priority": 1,
+                        "message": "Physical traits do not strongly match the Ascendant (BPHS Ch. 2)",
+                        "hint": "Please review height, build, or complexion. The Ascendant suggests different features."
+                    })
+                
+                # Fallback generic question
+                if not suggested_questions_refine:
+                    suggested_questions_refine.append({
+                        "field": "general_refinement",
+                        "priority": 2,
+                        "message": "Confidence is < 95% - Please verify details",
+                        "hint": "Add any additional life events or precise traits to reach 95%+ certainty."
+                    })
+            
+            # If high confidence but minimal input, add explicit confirmation request
+            if is_high_confidence and is_minimal_input:
+                suggested_questions_refine.insert(0, {
+                    "field": "heuristic_confirmation",
+                    "priority": 0,
+                    "message": "Astronomically aligned, but heuristic verification needed",
+                    "hint": "The candidate passes astronomical checks (Trine/Moon), but physical traits or life events are required to rule out mathematical coincidences."
+                })
+
     response = BTRResponse(
         engine_version="bphs-btr-prototype-v1",
         geocode=geocode_result,
@@ -1078,7 +1166,9 @@ async def btr(request: BTRRequest):
         candidates=candidate_models,
         best_candidate=best_candidate,
         rejections=rejection_models or None,
-        notes=methodology_notes
+        notes=methodology_notes,
+        suggested_questions=suggested_questions_refine,
+        needs_refinement=needs_refinement
     )
     total_elapsed = time.perf_counter() - t0
     _log_phase(

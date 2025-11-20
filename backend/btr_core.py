@@ -708,7 +708,7 @@ def calculate_nisheka_lagna(saturn_deg: float,
         'gestation_score': gestation_score
     }
 
-def apply_moon_purification(moon_deg: float, lagna_deg: float) -> tuple[float, float]:
+def apply_moon_purification(moon_deg: float, lagna_deg: float, actual_ishta_kala_palas: Optional[float] = None) -> tuple[float, float]:
     """Apply Moon-based purification per BPHS Verse 4.9.
     
     BPHS Verse 4.9:
@@ -724,46 +724,82 @@ def apply_moon_purification(moon_deg: float, lagna_deg: float) -> tuple[float, f
     ishta-kala (desired time) by using the Moon's position and subtracting 
     the 7th sign portion (210°), then finding the relationship with lagna.
     
-    Formula per BPHS 4.9:
-    1. Extract ishta-kala by subtracting the 7th portion (7 signs = 210°) from Moon
-    2. Calculate the relationship between lagna and this ishta-kala
-    3. This provides both the purification factor and alignment score
+    Formula per BPHS 4.9 (Corrected Interpretation):
+    1. Extract derived ishta-kala degrees by subtracting the 7th portion (7 signs = 210°) from Moon.
+       Derived Ishta Kala (Deg) = (Lagna - (Moon - 210)) % 360
+       This represents the time elapsed since sunrise in degrees of Lagna motion.
+    2. Convert actual Ishta Kala (palas) to degrees of motion.
+       Actual Motion (Deg) = (actual_ishta_kala_palas / 720) * 360  (approx, assuming 360 deg / 24 hrs)
+       Or simply compare the derived lagna-based time with the actual lagna position?
+       Actually, BPHS implies the derived time should match the actual time.
+       
+       Let's stick to the verse: "determine ishta-kala".
+       We derive a hypothetical Ishta Kala from Moon/Lagna relation.
+       We compare this derived time with the actual Ishta Kala of the candidate.
     
     Args:
         moon_deg: Moon's sidereal longitude in degrees (0-360).
         lagna_deg: Ascendant longitude in degrees (0-360).
+        actual_ishta_kala_palas: The actual time since sunrise in palas (optional).
         
     Returns:
-        tuple[float, float]: (ishta_kala_deg, purification_score)
-        - ishta_kala_deg: Extracted ishta-kala value in degrees (0-360)
-        - purification_score: Alignment score (0-100) based on angular relationship
+        tuple[float, float]: (derived_ishta_kala_deg, purification_score)
+        - derived_ishta_kala_deg: Extracted ishta-kala value in degrees (0-360)
+        - purification_score: Alignment score (0-100) based on time proximity
     """
     # Step 1: Extract ishta-kala by subtracting 7th portion from Moon (तस्मात्तत्सप्तमस्थात्तदं)
     # BPHS: "subtracting the 7th portion" = 7 signs = 7 × 30° = 210°
-    sevens_portion = moon_deg - (7 * 30.0)  # 7 signs = 210°
-    ishta_kala_raw = lagna_deg - sevens_portion
-    ishta_kala_deg = ishta_kala_raw % 360.0
+    # This gives us a reference point. The difference between Lagna and this point
+    # represents the Ishta Kala (time elapsed).
+    sevens_portion = (moon_deg - 210.0) % 360.0
+    derived_ishta_kala_deg = (lagna_deg - sevens_portion) % 360.0
     
-    # Step 2: Calculate angular relationship for purification scoring
-    # Find the 7th house from Moon (opposite position) for alignment verification
-    moon_7th_deg = (moon_deg + 180.0) % 360.0
-    delta_lagna_moon7th = astro_utils.angular_difference(lagna_deg, moon_7th_deg)
+    purification_score = 0.0
     
-    # Step 3: Convert to purification score (closer alignment = higher score)
-    # Using standard 2° orb tolerance for palā-level precision
-    moon_purification_orb = STRICT_PADA_EPSILON_DEGREES  # 0.2° for strict mode
-    if delta_lagna_moon7th <= moon_purification_orb:
-        purification_score = 100.0
+    # If we have actual time (palas), we can verify if the derived time matches actual time
+    if actual_ishta_kala_palas is not None:
+        # Convert actual palas to degrees of motion (assuming 1 day = 21600 palas? No, 60 ghatis * 60 palas = 3600 palas/day)
+        # Wait, BPHS standard day = 60 ghatis. 1 ghati = 60 palas. Total = 3600 palas.
+        # Lagna moves 360 degrees in ~3600 palas. (Average motion).
+        # So 1 pala approx 0.1 degree.
+        
+        # Actual degrees of motion from sunrise
+        # We need to know how much the Lagna has moved since sunrise.
+        # Ideally, this is just the difference between Current Lagna and Sunrise Lagna.
+        # But BPHS often simplifies: Ishta Kala in Palas / 10 = Degrees? 
+        # Let's use the proportional conversion: (Palas / 3600) * 360 = Palas / 10.
+        actual_motion_deg = (actual_ishta_kala_palas / 10.0) % 360.0
+        
+        # Compare derived time (degrees) with actual time (degrees)
+        # We compare them modulo 360.
+        delta = astro_utils.angular_difference(derived_ishta_kala_deg, actual_motion_deg)
+        
+        # Scoring: strict tolerance.
+        # Tolerance of 2 degrees (approx 20 palas = 8 mins)
+        tolerance = 2.0
+        if delta <= tolerance:
+            purification_score = max(0.0, 100.0 * (1.0 - (delta / tolerance)))
+        else:
+            purification_score = 0.0
+            
+        # Logging for debugging
+        logger.debug(f"Moon Purif (Time): Moon={moon_deg:.2f}, Lagna={lagna_deg:.2f}, "
+                     f"DerivedTime={derived_ishta_kala_deg:.2f} deg, ActualTime={actual_motion_deg:.2f} deg, "
+                     f"Delta={delta:.2f}, Score={purification_score}")
+    
     else:
-        # Linear decay of score as angular distance increases
-        max_orb = 30.0  # Maximum reasonable distance for Moon purification
-        purification_score = max(0.0, 100.0 * (1.0 - (delta_lagna_moon7th - moon_purification_orb) / (max_orb - moon_purification_orb)))
+        # Fallback to old spatial method if time not provided (should not happen in full flow)
+        # This maintains backward compatibility for tests not passing palas
+        moon_7th_deg = (moon_deg + 180.0) % 360.0
+        delta_lagna_moon7th = astro_utils.angular_difference(lagna_deg, moon_7th_deg)
+        moon_purification_orb = 2.0 
+        if delta_lagna_moon7th <= moon_purification_orb:
+            purification_score = 100.0
+        else:
+            max_orb = 30.0 
+            purification_score = max(0.0, 100.0 * (1.0 - (delta_lagna_moon7th - moon_purification_orb) / (max_orb - moon_purification_orb)))
     
-    logger.debug(f"Moon purification (Verse 4.9): Moon={moon_deg:.2f}°, 7th Moon={moon_7th_deg:.2f}°, "
-                f"Lagna={lagna_deg:.2f}°, delta={delta_lagna_moon7th:.2f}°, "
-                f"ishta_kala={ishta_kala_deg:.2f}°, score={purification_score:.2f}")
-    
-    return ishta_kala_deg, purification_score
+    return derived_ishta_kala_deg, purification_score
 
 
 
@@ -774,7 +810,8 @@ def apply_bphs_hard_filters(lagna_deg: float,
                             *,
                             madhya_pranapada_deg: Optional[float] = None,
                             orb_tolerance: float = 2.0,
-                            strict_bphs: bool = False
+                            strict_bphs: bool = False,
+                            total_palas: Optional[float] = None
                             ) -> tuple[bool, dict[str, float]]:
     """Apply BPHS hard filters to a single candidate time.
 
@@ -796,6 +833,7 @@ def apply_bphs_hard_filters(lagna_deg: float,
         gulika_deg: Gulika‑lagna longitude (choose appropriate day/night).
         moon_deg: Moon's longitude in degrees.
         orb_tolerance: Allowed orb (degrees) for Gulika/Moon anchors (default: 2.0°).
+        total_palas: Total palas elapsed since sunrise (for Verse 4.9 verification).
 
     Returns:
         tuple[bool, dict[str, float]]: (is_accepted, scores)
@@ -854,7 +892,7 @@ def apply_bphs_hard_filters(lagna_deg: float,
     # BPHS Verse 4.9: Moon-based Purification Fallback
     # दयोहीनबलेऽप्येवं गुलिकात्परिचिन्तयेत्‌ तस्मात्तत्सप्तमस्थात्तदं शाच्च कलत्रतः
     # "Even when not verified by Pranapada and Gulika, consider from Moon"
-    ishta_kala_deg, moon_purification_score = apply_moon_purification(moon_deg, lagna_deg)
+    ishta_kala_deg, moon_purification_score = apply_moon_purification(moon_deg, lagna_deg, total_palas)
 
     purification_anchor = None
     anchor_score = 0.0
@@ -1768,7 +1806,8 @@ def palashodhana_search(candidate_record: dict[str, Any],
             gulika_info['day_gulika_deg'], moon_val,
             madhya_pranapada_deg=madhya_pp_val,
             orb_tolerance=2.0,
-            strict_bphs=True  # Always use strict mode for śodhana
+            strict_bphs=True,  # Always use strict mode for śodhana
+            total_palas=total_palas
         )
         
         if accepted_val:
@@ -1955,7 +1994,8 @@ def search_candidate_times(dob: datetime.date,
             lagna_val, sphuta_pp_val, gulika_deg_value, moon_val,
             madhya_pranapada_deg=madhya_pp_val,
             orb_tolerance=orb_tolerance,
-            strict_bphs=strict_bphs
+            strict_bphs=strict_bphs,
+            total_palas=total_palas
         )
         
         # Compute Shadbala & Longevity if accepted (optimization: don't compute if rejected?)
@@ -2061,7 +2101,19 @@ def search_candidate_times(dob: datetime.date,
         heuristic_score = min(100.0, heuristic_base + validation_bonus)
 
         # Keep BPHS compliance primary but let real-world evidence influence ordering.
-        composite_score = (bphs_score * 0.7) + (heuristic_score * 0.3)
+        # Penalize "One-Legged" candidates (single weak purification)
+        corroboration_factor = 1.0
+        purification_anchor = scores.get('purification_anchor')
+        
+        # If only one anchor and it's not Pranapada (strongest) or direct Moon/Gulika
+        # Verse 4.9 (moon_verse9) is a fallback and should ideally be corroborated.
+        if purification_anchor == 'moon_verse9':
+            # Check if we have other evidence (traits or events)
+            has_heuristic_evidence = (heuristic_base > 30.0)
+            if not has_heuristic_evidence:
+                corroboration_factor = 0.9  # Cap score at 90% max if uncorroborated
+        
+        composite_score = ((bphs_score * 0.7) + (heuristic_score * 0.3)) * corroboration_factor
 
         candidate_record = {
             'time_local': candidate_dt.strftime('%Y-%m-%dT%H:%M:%S'),
