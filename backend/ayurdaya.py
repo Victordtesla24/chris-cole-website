@@ -21,7 +21,7 @@ from typing import Dict, List, Any, Tuple, Optional
 import swisseph as swe
 
 from .astro_utils import (
-    SUN, MOON, MARS, MERCURY, JUPITER, VENUS, SATURN,
+    SUN, MOON, MARS, MERCURY, JUPITER, VENUS, SATURN, RAHU, KETU,
     PLANETS, EXALTATION_DEGREES as EXALTATION_DEG, RELATIONSHIPS,
     get_sign_lord, get_house_from_lagna, is_retrograde, angular_difference
 )
@@ -96,7 +96,9 @@ def apply_haranas(raw_years: Dict[str, float],
     
     final_years = raw_years.copy()
     
-    malefics = [SUN, MARS, SATURN, 'rahu', 'ketu'] 
+    # Use consistent constants for malefics; nodes may be absent in legacy input,
+    # so we skip them if not provided rather than crashing mid-harana.
+    malefics = [SUN, MARS, SATURN, RAHU, KETU]
     benefics = [JUPITER, VENUS, MERCURY, MOON] 
     
     # Check for Krurodaya (Malefic in Lagna) first
