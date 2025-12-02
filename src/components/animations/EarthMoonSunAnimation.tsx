@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 
 /**
  * EarthMoonSunAnimation - Photorealistic Concept 2
@@ -90,6 +90,7 @@ const EarthMoonSunAnimation: React.FC<EarthMoonSunAnimationProps> = ({
   style = {},
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const starsRef = useRef<Star[]>([]);
   const solarParticlesRef = useRef<SolarParticle[]>([]);
@@ -101,6 +102,8 @@ const EarthMoonSunAnimation: React.FC<EarthMoonSunAnimationProps> = ({
   const moonAngleRef = useRef(0);
   const earthRotationRef = useRef(0);
   const moonRotationRef = useRef(0);
+  const visibilityRef = useRef(false);
+  const [shouldAnimate, setShouldAnimate] = useState(false);
 
   /**
    * Initialize star field
@@ -707,13 +710,72 @@ const EarthMoonSunAnimation: React.FC<EarthMoonSunAnimationProps> = ({
   ]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const applyState = (isVisible: boolean, reduceMotion: boolean) => {
+      visibilityRef.current = isVisible;
+      setShouldAnimate(isVisible && !reduceMotion);
+    };
+
+    const observer =
+      'IntersectionObserver' in window
+        ? new IntersectionObserver(
+            (entries) => {
+              const isVisible = entries.some((entry) => entry.isIntersecting);
+              applyState(isVisible, motionQuery.matches);
+            },
+            { rootMargin: '200px' }
+          )
+        : null;
+
+    if (observer && containerRef.current) {
+      observer.observe(containerRef.current);
+    } else {
+      applyState(true, motionQuery.matches);
+    }
+
+    const handleMotionChange = (event: MediaQueryListEvent) => {
+      applyState(visibilityRef.current, event.matches);
+    };
+
+    if (motionQuery.addEventListener) {
+      motionQuery.addEventListener('change', handleMotionChange);
+    } else if (motionQuery.addListener) {
+      motionQuery.addListener(handleMotionChange);
+    }
+
+    return () => {
+      if (motionQuery.removeEventListener) {
+        motionQuery.removeEventListener('change', handleMotionChange);
+      } else if (motionQuery.removeListener) {
+        motionQuery.removeListener(handleMotionChange);
+      }
+      observer?.disconnect();
+      applyState(false, motionQuery.matches);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!shouldAnimate) {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      return undefined;
+    }
+
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let ctx: CanvasRenderingContext2D | null = null;
+    try {
+      ctx = canvas.getContext('2d');
+    } catch {
+      return undefined;
+    }
+    if (!ctx) return undefined;
 
-    // Set canvas size
     const updateSize = () => {
       const parent = canvas.parentElement;
       if (parent) {
@@ -726,19 +788,23 @@ const EarthMoonSunAnimation: React.FC<EarthMoonSunAnimationProps> = ({
     updateSize();
     window.addEventListener('resize', updateSize);
 
-    // Start animation
     animationFrameRef.current = requestAnimationFrame(animate);
 
     return () => {
       window.removeEventListener('resize', updateSize);
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
+      starsRef.current = [];
+      solarParticlesRef.current = [];
+      solarFlaresRef.current = [];
     };
-  }, [animate, initializeStars]);
+  }, [animate, initializeStars, shouldAnimate]);
 
   return (
     <div
+      ref={containerRef}
       className={`earth-moon-sun-container ${className}`}
       style={{
         width: '100%',

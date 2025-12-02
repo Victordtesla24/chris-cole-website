@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState } from 'react';
 
 /**
  * SaturnCanvasAnimation
@@ -25,6 +25,9 @@ interface Star {
   y: number;
   size: number;
   opacity: number;
+  twinkleSpeed: number;
+  twinklePhase: number;
+  glowRadius: number;
 }
 
 interface Ring {
@@ -49,7 +52,7 @@ interface FrontSegment {
 const PLANET_RADIUS_RATIO = 0.08;
 const RING_COUNT = 8;
 const RING_ASPECT_RATIO = 0.4;
-const STAR_COUNT = 40;
+const STAR_COUNT = 140;
 const BASE_TILT = Math.PI / 6;
 const TILT_VARIATION = 0.0;
 const MIN_RING_RADIUS_FACTOR = 2.0;
@@ -59,31 +62,47 @@ const BASE_MOON_SPEED = 0.0002;     // moons drift slowly
 
 const SaturnCanvasAnimation: React.FC<SaturnCanvasAnimationProps> = ({ className = '', style = {} }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const animationFrameId = useRef<number | null>(null);
   const starsRef = useRef<Star[]>([]);
   const ringsRef = useRef<Ring[]>([]);
   const rotationRef = useRef({ offset: 0, lastTimestamp: 0 });
+  const visibilityRef = useRef(false);
+  const [shouldAnimate, setShouldAnimate] = useState(false);
 
   /** Initialize stars with random positions, sizes, and opacities. */
   const initStars = useCallback((canvas: HTMLCanvasElement) => {
     const stars: Star[] = [];
     for (let i = 0; i < STAR_COUNT; i++) {
+      const isBright = Math.random() > 0.75;
+      const size = isBright ? Math.random() * 1.2 + 0.4 : Math.random() * 0.6 + 0.15;
       stars.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        size: Math.random() * 1.5 + 0.5,
-        opacity: Math.random() * 0.5 + 0.3,
+        size,
+        opacity: isBright ? Math.random() * 0.4 + 0.6 : Math.random() * 0.4 + 0.2,
+        twinkleSpeed: 0.6 + Math.random() * 1.4,
+        twinklePhase: Math.random() * Math.PI * 2,
+        glowRadius: size * (isBright ? 6 : 3),
       });
     }
     starsRef.current = stars;
   }, []);
 
   /** Draw the star field. */
-  const drawStars = useCallback((ctx: CanvasRenderingContext2D) => {
+  const drawStars = useCallback((ctx: CanvasRenderingContext2D, time: number) => {
     starsRef.current.forEach((star) => {
+      const sparkle = 0.6 + 0.4 * Math.sin(time * star.twinkleSpeed + star.twinklePhase);
+      const finalOpacity = star.opacity * sparkle;
+
+      const gradient = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, star.glowRadius);
+      gradient.addColorStop(0, `rgba(255, 255, 255, ${finalOpacity})`);
+      gradient.addColorStop(0.6, `rgba(255, 255, 255, ${finalOpacity * 0.4})`);
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
       ctx.beginPath();
-      ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${star.opacity})`;
+      ctx.fillStyle = gradient;
+      ctx.arc(star.x, star.y, star.size * (1.1 + sparkle * 0.2), 0, Math.PI * 2);
       ctx.fill();
       ctx.closePath();
     });
@@ -186,6 +205,7 @@ const SaturnCanvasAnimation: React.FC<SaturnCanvasAnimationProps> = ({ className
 
     // Update rotation offset (remains zero because BASE_ROTATION_SPEED is zero)
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const timeInSeconds = now / 1000;
     if (!rotationRef.current.lastTimestamp) {
       rotationRef.current.lastTimestamp = now;
     }
@@ -199,7 +219,7 @@ const SaturnCanvasAnimation: React.FC<SaturnCanvasAnimationProps> = ({ className
       ring.moonAngle += dt * BASE_MOON_SPEED * ring.speedFactor;
     });
 
-    drawStars(ctx);
+    drawStars(ctx, timeInSeconds);
 
     // Draw back half of rings and collect front segments
     const frontSegments = drawRings(ctx, cx, cy, rotationRef.current.offset);
@@ -273,10 +293,63 @@ const SaturnCanvasAnimation: React.FC<SaturnCanvasAnimationProps> = ({ className
     animationFrameId.current = requestAnimationFrame(render);
   }, [drawStars, drawRings, drawPlanet]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const applyState = (isVisible: boolean, reduceMotion: boolean) => {
+      visibilityRef.current = isVisible;
+      setShouldAnimate(isVisible && !reduceMotion);
+    };
+
+    const observer =
+      'IntersectionObserver' in window
+        ? new IntersectionObserver(
+            (entries) => {
+              const isVisible = entries.some((entry) => entry.isIntersecting);
+              applyState(isVisible, motionQuery.matches);
+            },
+            { rootMargin: '200px' }
+          )
+        : null;
+
+    if (observer && containerRef.current) {
+      observer.observe(containerRef.current);
+    } else {
+      applyState(true, motionQuery.matches);
+    }
+
+    const handleMotionChange = (event: MediaQueryListEvent) => {
+      applyState(visibilityRef.current, event.matches);
+    };
+
+    if (motionQuery.addEventListener) {
+      motionQuery.addEventListener('change', handleMotionChange);
+    } else if (motionQuery.addListener) {
+      motionQuery.addListener(handleMotionChange);
+    }
+
+    return () => {
+      if (motionQuery.removeEventListener) {
+        motionQuery.removeEventListener('change', handleMotionChange);
+      } else if (motionQuery.removeListener) {
+        motionQuery.removeListener(handleMotionChange);
+      }
+      observer?.disconnect();
+      applyState(false, motionQuery.matches);
+    };
+  }, []);
+
   // Resize canvas and initialize stars/rings on mount
   useEffect(() => {
+    if (!shouldAnimate) {
+      starsRef.current = [];
+      ringsRef.current = [];
+      return undefined;
+    }
+
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
 
     const resize = () => {
       const parent = canvas.parentElement;
@@ -319,22 +392,35 @@ const SaturnCanvasAnimation: React.FC<SaturnCanvasAnimationProps> = ({ className
     window.addEventListener('resize', resize);
     return () => {
       window.removeEventListener('resize', resize);
+      // Clear references so GC can reclaim memory.
+      starsRef.current = [];
+      ringsRef.current = [];
     };
-  }, [initStars]);
+  }, [initStars, shouldAnimate]);
 
   // Start the render loop on mount
   useEffect(() => {
+    if (!shouldAnimate) {
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+        animationFrameId.current = null;
+      }
+      return undefined;
+    }
+
     render();
 
     return () => {
       if (animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
+        animationFrameId.current = null;
       }
     };
-  }, [render]);
+  }, [render, shouldAnimate]);
 
   return (
     <div
+      ref={containerRef}
       className={`saturn-canvas-container ${className}`.trim()}
       style={{
         position: 'absolute',
