@@ -72,6 +72,7 @@ export interface BTRRequest {
   tz_offset_hours: number;
   approx_tob: ApproxTob;
   time_range_override?: TimeRangeOverride | null;
+  prashna_mode?: boolean;
   optional_traits?: PhysicalTraits | null;
   optional_events?: LifeEvents | null;
 }
