@@ -1,0 +1,6 @@
+{
+  "hosting": {
+    "site": "btr-demo-site",
+    "source": "."
+  }
+}
